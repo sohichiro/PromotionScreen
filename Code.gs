@@ -173,10 +173,10 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   const fileBytes = blob.getBytes();
   
   // バイト配列を結合
-  const payload = [];
-  for (var i = 0; i < header.length; i++) payload.push(header[i]);
-  for (var i = 0; i < fileBytes.length; i++) payload.push(fileBytes[i]);
-  for (var i = 0; i < footer.length; i++) payload.push(footer[i]);
+  const payloadBytes = [];
+  for (var i = 0; i < header.length; i++) payloadBytes.push(header[i]);
+  for (var i = 0; i < fileBytes.length; i++) payloadBytes.push(fileBytes[i]);
+  for (var i = 0; i < footer.length; i++) payloadBytes.push(footer[i]);
   
   const uploadResp = UrlFetchApp.fetch("https://slack.com/api/files.upload", {
     method: "post",
@@ -184,7 +184,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
       "Authorization": "Bearer " + CONFIG.slackBotToken,
       "Content-Type": "multipart/form-data; boundary=" + boundary
     },
-    payload: payload,
+    payload: payloadBytes,
     muteHttpExceptions: true,
   });
 
