@@ -8,6 +8,13 @@ const CONFIG = {
   slackChannelId: PropertiesService.getScriptProperties().getProperty("SLACK_CHANNEL_ID") || "",
 };
 
+// ===== サイネージ設定（表示用） =====
+const SIGNAGE_CONFIG = {
+  FOLDER_ID: '13BiDOSJ4mGU5UnBIU6JxqU-ECOu7jfbE', // ok等、表示対象フォルダのIDに変更可
+  EXPIRES_MS: 24 * 60 * 60 * 1000,
+  ALLOW_ORIGIN: '*',
+};
+
 const META_KEYS = {
   comment: "comment",
   uploadedAt: "uploadedAt",
@@ -238,6 +245,22 @@ function buildReviewUrl(file, status) {
 }
 
 function doGet(event) {
+  const fn = event?.parameter?.fn;
+  if (fn) {
+    // ===== サイネージAPI (list / img64 / image) =====
+    try {
+      if (fn === 'list') return handleList_();
+      if (fn === 'img64') return handleImg64_(event);
+      if (fn === 'image') return handleImage_(event);
+      return ContentService.createTextOutput(JSON.stringify({ error: 'unknown fn' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    } catch (err) {
+      return ContentService.createTextOutput(JSON.stringify({ error: String(err) }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }
+
+  // ===== 既存: 承認/非承認の移動アクション =====
   const action = event?.parameter?.action;
   const fileId = event?.parameter?.fileId;
 
@@ -332,6 +355,123 @@ function applyCorsHeaders(output) {
   }
 }
 
+// =========================
+// サイネージ API（list/img64/image）
+// =========================
+
+// 署名シークレット（Script Properties 推奨）
+function getSecret_() {
+  const p = PropertiesService.getScriptProperties().getProperty('SHARED_SECRET');
+  return p || 'TEMP_SECRET';
+}
+
+function signFor_(id, exp) {
+  const data = `${id}.${exp}`;
+  const bytes = Utilities.computeHmacSha256Signature(data, getSecret_());
+  return Utilities.base64EncodeWebSafe(bytes);
+}
+
+function handleList_() {
+  const folder = DriveApp.getFolderById(SIGNAGE_CONFIG.FOLDER_ID);
+  const files = folder.getFiles();
+
+  const items = [];
+  while (files.hasNext()) {
+    const f = files.next();
+    const name = f.getName();
+    const mime = f.getMimeType() || '';
+    const isImage =
+      mime.startsWith('image/') ||
+      /heic|heif/i.test(mime) ||
+      /\.(heic|heif|jpe?g|png|gif|webp|bmp|tiff?)$/i.test(name);
+    if (!isImage) continue;
+
+    const id = f.getId();
+    const updated = f.getLastUpdated();
+    const exp = Date.now() + SIGNAGE_CONFIG.EXPIRES_MS;
+    const sig = signFor_(id, exp);
+    const base = ScriptApp.getService().getUrl();
+    const url  = `${base}?fn=img64&id=${encodeURIComponent(id)}&exp=${exp}&sig=${encodeURIComponent(sig)}`;
+
+    items.push({
+      id, name, mimeType: mime,
+      updatedAt: updated.toISOString(),
+      size: f.getSize(),
+      url,
+    });
+  }
+  items.sort((a,b)=> new Date(b.updatedAt) - new Date(a.updatedAt));
+
+  return ContentService
+    .createTextOutput(JSON.stringify({ now: new Date().toISOString(), count: items.length, items }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function handleImg64_(e) {
+  const id = e.parameter.id;
+  const exp = Number(e.parameter.exp || 0);
+  const sig = e.parameter.sig;
+  if (!id || !exp || !sig) return ContentService.createTextOutput(JSON.stringify({error:'Bad Request'})).setMimeType(ContentService.MimeType.JSON);
+  if (Date.now() > exp)   return ContentService.createTextOutput(JSON.stringify({error:'Link expired'})).setMimeType(ContentService.MimeType.JSON);
+  if (sig !== signFor_(id, exp)) return ContentService.createTextOutput(JSON.stringify({error:'Invalid signature'})).setMimeType(ContentService.MimeType.JSON);
+
+  const blob = DriveApp.getFileById(id).getBlob();
+  const mime = blob.getContentType() || 'application/octet-stream';
+  const b64  = Utilities.base64Encode(blob.getBytes());
+
+  return ContentService
+    .createTextOutput(JSON.stringify({ mime, data: b64 }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function handleImage_(e) {
+  const id = e.parameter.id;
+  const exp = Number(e.parameter.exp || 0);
+  const sig = e.parameter.sig;
+  if (!id || !exp || !sig) return ContentService.createTextOutput('Bad Request');
+
+  if (Date.now() > exp) return ContentService.createTextOutput('Link expired');
+  if (sig !== signFor_(id, exp)) return ContentService.createTextOutput('Invalid signature');
+
+  const file = DriveApp.getFileById(id);
+  const blob = file.getBlob();
+  return ContentService.createOutput(blob);
+}
+
+// （必要に応じてCORSヘッダを付けるバリアント）
+function jsonResponse_(obj, status, extraHeaders) {
+  const text = JSON.stringify(obj, null, 2);
+  const out = ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
+  return addHeaders_(out, Object.assign({
+    'Access-Control-Allow-Origin': SIGNAGE_CONFIG.ALLOW_ORIGIN,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'no-store',
+  }, extraHeaders || {}), status);
+}
+
+function textResponse_(text, status) {
+  const out = ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.TEXT);
+  return addHeaders_(out, {
+    'Access-Control-Allow-Origin': SIGNAGE_CONFIG.ALLOW_ORIGIN,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'no-store',
+  }, status);
+}
+
+function addHeaders_(output, headers, status) {
+  const resp = output;
+  // Apps ScriptのContentServiceは任意ステータス設定APIがありません（＝常に200）。
+  // ここでは可能な範囲でヘッダを付与します。
+  if (headers) {
+    const keys = Object.keys(headers);
+    for (const k of keys) {
+      resp.setHeader(k, String(headers[k]));
+    }
+  }
+  return resp;
+}
 // =========================
 // Slack Interactivity 処理
 // =========================
