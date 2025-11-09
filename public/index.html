@@ -9,9 +9,8 @@
   <meta charset="utf-8" />
 
   <meta name="apple-mobile-web-app-capable" content="yes">
-
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Drive Slideshow">
   <meta name="theme-color" content="#000000">
 
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
@@ -21,14 +20,31 @@
   <title>Drive Slideshow</title>
 
   <style>
-    html,
+    html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      position: fixed;
+      width: 100%;
+    }
+
     body {
       margin: 0;
       padding: 0;
       height: 100%;
+      height: 100vh;
+      height: 100dvh;
       background: #FFFFFF;
       color: #000;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", Arial, sans-serif;
+      overflow: hidden;
+      position: fixed;
+      width: 100%;
+      top: 0;
+      left: 0;
     }
 
     #stage {
