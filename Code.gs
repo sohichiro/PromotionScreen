@@ -61,10 +61,14 @@ function doPost(event) {
     // メタデータをファイルの説明に JSON 形式で保存
     const metadata = {
       comment: payload.comment || "",
+      email: payload.email || "",
       uploadedAt: payload.timestamp || new Date().toISOString(),
       status: STATUS.pending,
     };
-    const description = payload.comment || "";
+    // メールアドレスがある場合はJSON形式で保存、ない場合はコメントのみ
+    const description = payload.email 
+      ? JSON.stringify(metadata)
+      : (payload.comment || "");
     file.setDescription(description);
     file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
     
@@ -299,12 +303,12 @@ function doGet(event) {
 
   try {
     if (action === "moveToOk") {
-      moveFile(fileId, STATUS.approved);
+      moveFile(fileId, STATUS.approved, "");
       return HtmlService.createHtmlOutput("OK フォルダへ移動しました。");
     }
 
     if (action === "moveToNg") {
-      moveFile(fileId, STATUS.rejected);
+      moveFile(fileId, STATUS.rejected, "");
       return HtmlService.createHtmlOutput("NG フォルダへ移動しました。");
     }
 
@@ -319,12 +323,30 @@ function doOptions() {
   return buildCorsResponse();
 }
 
-function moveFile(fileId, status) {
+function moveFile(fileId, status, reason) {
   paperLog("[moveFile] 開始", "fileId=" + fileId, "status=" + status);
   
   try {
     const file = DriveApp.getFileById(fileId);
     paperLog("[moveFile] ファイル取得成功", "fileName=" + file.getName());
+    
+    // メールアドレスを取得
+    let email = "";
+    try {
+      const description = file.getDescription();
+      if (description) {
+        // JSON形式で保存されている場合
+        try {
+          const metadata = JSON.parse(description);
+          email = metadata.email || "";
+        } catch (e) {
+          // JSON形式でない場合はコメントのみなのでメールアドレスなし
+          email = "";
+        }
+      }
+    } catch (e) {
+      paperLog("[moveFile] メールアドレス取得エラー（無視）", "error=" + String(e));
+    }
     
     const currentParents = file.getParents();
     const targetFolderId = status === STATUS.approved ? CONFIG.okFolderId : CONFIG.ngFolderId;
@@ -343,9 +365,56 @@ function moveFile(fileId, status) {
     // ターゲットフォルダにファイルを追加
     targetFolder.addFile(file);
     paperLog("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
+    
+    // メールアドレスがある場合は審査結果をメール送信
+    if (email) {
+      sendReviewResultEmail(email, file.getName(), status, reason || "");
+    }
   } catch (err) {
     paperLog("[ERROR] [moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
     throw err;
+  }
+}
+
+function sendReviewResultEmail(email, fileName, status, reason) {
+  try {
+    paperLog("[sendReviewResultEmail] 開始", "email=" + email, "fileName=" + fileName, "status=" + status);
+    
+    const subject = status === STATUS.approved 
+      ? "【審査結果】画像が承認されました"
+      : "【審査結果】画像が承認されませんでした";
+    
+    let body = "";
+    if (status === STATUS.approved) {
+      body = `お送りいただいた画像の審査が完了いたしました。
+
+【審査結果】承認
+【ファイル名】${fileName}
+
+ご投稿いただいた画像は承認され、デジタルサイネージや公式サイトで公開される予定です。
+
+ご協力ありがとうございました。`;
+    } else {
+      const reasonText = reason ? `\n【理由】${reason}` : "";
+      body = `お送りいただいた画像の審査が完了いたしました。
+
+【審査結果】非承認${reasonText}
+【ファイル名】${fileName}
+
+申し訳ございませんが、ご投稿いただいた画像は承認されませんでした。
+ご理解のほどよろしくお願いいたします。`;
+    }
+    
+    MailApp.sendEmail({
+      to: email,
+      subject: subject,
+      body: body
+    });
+    
+    paperLog("[sendReviewResultEmail] メール送信完了", "email=" + email);
+  } catch (err) {
+    paperLog("[ERROR] [sendReviewResultEmail] メール送信エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    // メール送信エラーは処理を続行する（ファイル移動は成功しているため）
   }
 }
 
@@ -533,7 +602,7 @@ function handleSlackInteractivity(event) {
         
         try {
           // ファイルを OK フォルダへ移動
-          moveFile(val.fileId, STATUS.approved);
+          moveFile(val.fileId, STATUS.approved, "");
 
           // 監査ログを記録
           logAudit("OK", val.fileId, val.name, userId, "", channel, ts);
@@ -691,7 +760,7 @@ function handleSlackInteractivity(event) {
         paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
 
         // ファイルを NG フォルダへ移動
-        moveFile(meta.fileId, STATUS.rejected);
+        moveFile(meta.fileId, STATUS.rejected, reason);
 
         // 監査ログを記録
         logAudit("NG", meta.fileId, meta.name, userId, reason, meta.channel, meta.ts);
