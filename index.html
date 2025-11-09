@@ -261,7 +261,6 @@
     <div id="clock-fixed">--:--:--</div>
     <div id="hint">トリプルタップでステータス表示 / 表示中はダブルタップで全画面 / 2本指で一時停止</div>
     <div id="hud">
-      <div class="pill" id="status">—</div>
     </div>
 
   </div>
@@ -273,7 +272,6 @@
 
     const layerA = document.getElementById('layerA');
     const layerB = document.getElementById('layerB');
-    const statusEl = document.getElementById('status');
     let currentLayer = layerA;
     let nextLayer = layerB;
     let items = []; // {url, updatedAt, ...}
@@ -392,11 +390,8 @@
       try { return new Date(s).toLocaleString('ja-JP'); } catch { return s; }
     }
 
-    function status(msg) { statusEl.textContent = msg; }
-
     async function fetchList() {
       setAppState('updating');
-      status('読み込み中…');
 
       // 15秒タイムアウト
       const ctrl = new AbortController();
@@ -412,7 +407,6 @@
         if (!res.ok) {
           const text = await res.text().catch(() => '');
           console.error('list non-OK', res.status, text);
-          status(`読み込み失敗 (${res.status})`);
           return;
         }
 
@@ -422,7 +416,6 @@
         } catch (e) {
           const text = await res.text().catch(() => '');
           console.error('JSON parse error. body=', text);
-          status('JSON解析エラー');
           return;
         }
 
@@ -437,16 +430,13 @@
         badgeUpdated.textContent = `Updated ${fmtTime(json.now)}`;
 
         if (!items.length) {
-          status('画像が見つかりません（フォルダ/権限を確認）');
           setAppState('warn', 'No images');
           return;
         }
-        status(`画像 ${items.length} 枚 / 更新 ${fmtTime(json.now)}`);
         // 実行中かどうかで状態
         setAppState(running ? 'playing' : 'paused');
       } catch (e) {
         console.error('fetch list error', e);
-        status(e.name === 'AbortError' ? 'タイムアウト' : '通信エラー');
       } finally {
         clearTimeout(to);
       }
@@ -515,12 +505,11 @@
       inFlight = true;
       try {
         const it = pickNextWeighted();
-        if (!it) { status('候補がありません'); return; }
+        if (!it) { return; }
 
         // どのURLで落ちてるか一緒に表示
         //status(`読み込み: ${it.name || ''}\n${it.url}`);
         setAppState('loading', it.name || '');
-        status(`読み込み: ${it.name || ''}`);
 
         const img = await preload(it.url);
 
@@ -531,11 +520,9 @@
         [currentLayer, nextLayer] = [nextLayer, currentLayer];
         // この瞬間から表示時間カウント開始
         lastSwapAt = Date.now();
-        status('');
         setAppState(running ? 'playing' : 'paused');
       } catch (e) {
         console.error('showNext error', e);
-        status(`読み込みエラー: ${String(e).slice(0, 300)}`);
         setAppState('error', 'Render');
       } finally {
         inFlight = false;
@@ -603,10 +590,8 @@
     window.addEventListener('touchstart', (ev) => {
       if (ev.touches.length === 2) {
         running = !running;
-        status(running ? '再開' : '一時停止');
         setAppState(running ? 'playing' : 'paused');
         if (running) scheduleNext(SLIDE_MS);
-        setTimeout(() => status(''), 1500);
       }
       if (ev.touches.length > 1) {
         multiTouchGesture = true;
