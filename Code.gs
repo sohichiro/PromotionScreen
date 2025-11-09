@@ -141,6 +141,10 @@ function doGet(event) {
   }
 }
 
+function doOptions() {
+  return buildCorsResponse();
+}
+
 function moveFile(fileId, status) {
   const file = DriveApp.getFileById(fileId);
   const currentParents = file.getParents();
@@ -159,10 +163,24 @@ function moveFile(fileId, status) {
 function buildJsonResponse(payload, status = 200) {
   const output = ContentService.createTextOutput(JSON.stringify({ ...payload, status }));
   output.setMimeType(ContentService.MimeType.JSON);
+  applyCorsHeaders(output);
   return output;
 }
 
 function buildErrorResponse(message, status = 500) {
   return buildJsonResponse({ ok: false, error: message }, status);
+}
+
+function buildCorsResponse() {
+  const output = ContentService.createTextOutput("");
+  applyCorsHeaders(output);
+  return output;
+}
+
+function applyCorsHeaders(output) {
+  output.setMimeType(ContentService.MimeType.JSON);
+  output.setHeader("Access-Control-Allow-Origin", "*");
+  output.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  output.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 }
 
