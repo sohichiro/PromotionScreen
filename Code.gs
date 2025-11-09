@@ -306,11 +306,15 @@ function buildCorsResponse() {
 }
 
 function applyCorsHeaders(output) {
-  output.setHeaders({
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  });
+  // Apps Script の TextOutput には setHeaders メソッドが存在しないため、
+  // no-cors モードを使用しているため CORS ヘッダーは不要
+  // エラーを防ぐために何もしない
+  try {
+    // 将来的にヘッダー設定が必要になった場合のためのプレースホルダー
+    // output.setHeaders() は使用できない
+  } catch (err) {
+    console.warn("applyCorsHeaders: ヘッダー設定はスキップされました", err);
+  }
 }
 
 // =========================
