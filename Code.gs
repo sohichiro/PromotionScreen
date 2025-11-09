@@ -159,16 +159,15 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   console.log("[postPhotoToSlackWithBlockKit] ファイル情報", "filename=" + file.getName(), "length=" + fileSize);
   paperLog("[postPhotoToSlackWithBlockKit] ファイル情報", "filename=" + file.getName(), "length=" + fileSize);
   
-  const urlResp = UrlFetchApp.fetch("https://slack.com/api/files.getUploadURLExternal", {
+  const getUploadUrl = "https://slack.com/api/files.getUploadURLExternal" +
+    "?filename=" + encodeURIComponent(file.getName()) +
+    "&length=" + fileSize;
+  
+  const urlResp = UrlFetchApp.fetch(getUploadUrl, {
     method: "post",
     headers: {
       "Authorization": "Bearer " + CONFIG.slackBotToken
     },
-    contentType: "application/json",
-    payload: JSON.stringify({
-      "filename": file.getName(),
-      "length": fileSize
-    }),
     muteHttpExceptions: true,
   });
 
