@@ -214,7 +214,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
         title: file.getName()
       }],
       channel_id: CONFIG.slackChannelId,
-      initial_comment: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}`
+      initial_comment: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\n${new Date().toLocaleString("ja-JP")}\nコメント: ${escapeMrkdwn(comment)}\n<${fileUrl}|📷 Driveで画像を開く>`
     }),
     muteHttpExceptions: true,
   });
@@ -238,7 +238,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `────────────────────\n<${fileUrl}|📷 Driveで画像を開く>`
+        text: `────────────────────`
       }
     },
     {
@@ -284,8 +284,9 @@ function postPhotoToSlackWithBlockKit(file, payload) {
     return;
   }
 
-  console.log("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonData.ts);
-  paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿完了");
+  const buttonTs = buttonData.ts;
+  console.log("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
+  paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
 }
 
 function doGet(event) {
@@ -521,6 +522,9 @@ function addHeaders_(output, headers, status) {
 // =========================
 
 function handleSlackInteractivity(event) {
+  paperLog("[handleSlackInteractivity] 関数が呼ばれました");
+  console.log("[handleSlackInteractivity] 関数が呼ばれました");
+  
   try {
     // 署名検証（開発時はスキップ）
     // if (CONFIG.slackSigningSecret && !verifySlackSignature(event)) {
@@ -528,11 +532,14 @@ function handleSlackInteractivity(event) {
     // }
 
     const payloadRaw = event.parameter.payload || "";
+    paperLog("[handleSlackInteractivity] payloadRaw確認", "hasPayload=" + !!payloadRaw, "length=" + (payloadRaw?.length || 0));
+    
     if (!payloadRaw) {
       return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
     }
 
     const payload = JSON.parse(payloadRaw);
+    paperLog("[handleSlackInteractivity] payload解析完了", "type=" + (payload.type || "なし"));
 
     if (payload.type === "block_actions") {
       const action = payload.actions[0];
@@ -540,6 +547,8 @@ function handleSlackInteractivity(event) {
       const channel = payload.channel.id;
       const ts = payload.message.ts;
       const val = JSON.parse(action.value);
+      
+      paperLog("[handleSlackInteractivity] block_actions", "action_id=" + action.action_id, "channel=" + channel, "ts=" + ts);
 
       if (action.action_id === "ok_move") {
         console.log("[handleSlackInteractivity] OK処理開始", "fileId=" + val.fileId, "fileName=" + val.name);
@@ -552,14 +561,19 @@ function handleSlackInteractivity(event) {
 
           // メッセージを更新してボタンを無効化し、完了ステータスを追加
           let updatedBlocks = JSON.parse(JSON.stringify(payload.message.blocks || []));
+          paperLog("[handleSlackInteractivity] 元のブロック数", "count=" + updatedBlocks.length);
+          
           // actionsブロックを削除
           updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
+          paperLog("[handleSlackInteractivity] actions削除後のブロック数", "count=" + updatedBlocks.length);
+          
           // ステータスを追加
           updatedBlocks.push({
             type: "context",
             elements: [{ type: "mrkdwn", text: `✅ 承認済み by <@${userId}> → OKフォルダへ移動しました` }]
           });
 
+          paperLog("[handleSlackInteractivity] chat.update呼び出し", "channel=" + channel, "ts=" + ts);
           const updateResp = UrlFetchApp.fetch("https://slack.com/api/chat.update", {
             method: "post",
             headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
@@ -567,11 +581,19 @@ function handleSlackInteractivity(event) {
             payload: JSON.stringify({
               channel: channel,
               ts: ts,
-              text: "新着写真",
+              text: "審査ボタン",
               blocks: updatedBlocks
             }),
             muteHttpExceptions: true,
           });
+          
+          const updateData = JSON.parse(updateResp.getContentText() || "{}");
+          paperLog("[handleSlackInteractivity] chat.updateレスポンス", "ok=" + updateData.ok, "error=" + (updateData.error || "なし"));
+          
+          if (!updateData.ok) {
+            console.error("[handleSlackInteractivity] メッセージ更新エラー", "error=" + updateResp.getContentText());
+            paperLog("[handleSlackInteractivity] メッセージ更新エラー", "error=" + updateResp.getContentText());
+          }
           
           console.log("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
           paperLog("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
@@ -634,14 +656,19 @@ function handleSlackInteractivity(event) {
 
         // メッセージを更新してボタンを無効化し、完了ステータスを追加
         let updatedBlocks = JSON.parse(JSON.stringify(meta.blocks || []));
+        paperLog("[handleSlackInteractivity] NG: 元のブロック数", "count=" + updatedBlocks.length);
+        
         // actionsブロックを削除
         updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
+        paperLog("[handleSlackInteractivity] NG: actions削除後のブロック数", "count=" + updatedBlocks.length);
+        
         // ステータスを追加
         updatedBlocks.push({
           type: "context",
           elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → NGフォルダへ移動しました` }]
         });
 
+        paperLog("[handleSlackInteractivity] NG: chat.update呼び出し", "channel=" + meta.channel, "ts=" + meta.ts);
         const updateResp = UrlFetchApp.fetch("https://slack.com/api/chat.update", {
           method: "post",
           headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
@@ -649,11 +676,19 @@ function handleSlackInteractivity(event) {
           payload: JSON.stringify({
             channel: meta.channel,
             ts: meta.ts,
-            text: "新着写真",
+            text: "審査ボタン",
             blocks: updatedBlocks
           }),
           muteHttpExceptions: true,
         });
+        
+        const updateData = JSON.parse(updateResp.getContentText() || "{}");
+        paperLog("[handleSlackInteractivity] NG: chat.updateレスポンス", "ok=" + updateData.ok, "error=" + (updateData.error || "なし"));
+        
+        if (!updateData.ok) {
+          console.error("[handleSlackInteractivity] NG: メッセージ更新エラー", "error=" + updateResp.getContentText());
+          paperLog("[handleSlackInteractivity] NG: メッセージ更新エラー", "error=" + updateResp.getContentText());
+        }
         
         console.log("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
         paperLog("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
