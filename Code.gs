@@ -54,6 +54,7 @@ const CONFIG = {
   auditSheetId: PropertiesService.getScriptProperties().getProperty("AUDIT_SHEET_ID") || "",
   debugMode: PropertiesService.getScriptProperties().getProperty("DEBUG_MODE") === "true",
   debugSheetId: PropertiesService.getScriptProperties().getProperty("DEBUG_SHEET_ID") || "",
+  queueSheetId: PropertiesService.getScriptProperties().getProperty("QUEUE_SHEET_ID") || "", // NG処理キュー用スプレッドシートID
 };
 
 /**
@@ -711,7 +712,176 @@ function addHeaders_(output, headers, status) {
   return resp;
 }
 // =========================
-// 非同期NG処理
+// NG処理キュー
+// =========================
+
+/**
+ * NG処理をキューに追加する
+ * @param {Object} queueData - キューに追加するデータ
+ */
+function enqueueNGProcessing(queueData) {
+  try {
+    // キュー用スプレッドシートID（デバッグシートIDを使用）
+    const sheetId = CONFIG.queueSheetId || CONFIG.debugSheetId;
+    if (!sheetId) {
+      paperLog("[WARN] [enqueueNGProcessing] キュー用シートIDが設定されていません。直接処理を実行します。");
+      // フォールバック: 直接処理を実行
+      processNGFromQueue(queueData);
+      return;
+    }
+    
+    const ss = SpreadsheetApp.openById(sheetId);
+    let sh = ss.getSheetByName("NG処理キュー");
+    if (!sh) {
+      sh = ss.insertSheet("NG処理キュー");
+      // ヘッダーを追加
+      sh.appendRow([
+        "タイムスタンプ",
+        "ステータス",
+        "ファイルID",
+        "ファイル名",
+        "理由",
+        "メールに理由を含める",
+        "ユーザーID",
+        "チャンネルID",
+        "メッセージTS",
+        "ブロックJSON"
+      ]);
+    }
+    
+    // キューに追加
+    sh.appendRow([
+      queueData.timestamp,
+      "PENDING",
+      queueData.fileId,
+      queueData.fileName,
+      queueData.reason,
+      queueData.includeReasonInEmail ? "YES" : "NO",
+      queueData.userId,
+      queueData.channel,
+      queueData.ts,
+      JSON.stringify(queueData.blocks)
+    ]);
+    
+    paperLog("[enqueueNGProcessing] キューに追加完了", "fileId=" + queueData.fileId);
+  } catch (err) {
+    paperLog("[ERROR] [enqueueNGProcessing] キュー追加エラー", "error=" + String(err));
+  }
+  
+  // ★ キュー追加後、非同期で処理を実行
+  // Apps ScriptではreturnしてもバックグラウンドでLockServiceを使って処理を続行できる
+  try {
+    // スクリプトロックを取得してバックグラウンド処理を実行
+    const lock = LockService.getScriptLock();
+    if (lock.tryLock(0)) { // タイムアウト0で即座に試行
+      try {
+        // ロックを取得できたら処理を実行（他の処理と競合しない）
+        processNGFromQueue(queueData);
+      } finally {
+        lock.releaseLock();
+      }
+    } else {
+      // ロックを取得できなかった場合は、別のインスタンスが処理中
+      paperLog("[enqueueNGProcessing] 別のインスタンスが処理中のためスキップ", "fileId=" + queueData.fileId);
+    }
+  } catch (processErr) {
+    paperLog("[ERROR] [enqueueNGProcessing] 処理実行エラー", "error=" + String(processErr));
+  }
+}
+
+/**
+ * キューからNG処理を実行する
+ * @param {Object} queueData - 処理データ
+ */
+function processNGFromQueue(queueData) {
+  paperLog("[processNGFromQueue] NG処理開始", "fileId=" + queueData.fileId);
+  
+  try {
+    // 1. まず「処理中...」メッセージを表示
+    try {
+      let updatedBlocks = JSON.parse(JSON.stringify(queueData.blocks || []));
+      updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
+      updatedBlocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${queueData.userId}>：${escapeMrkdwn(queueData.reason)}） → 処理中...` }]
+      });
+      
+      UrlFetchApp.fetch("https://slack.com/api/chat.update", {
+        method: "post",
+        headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+        contentType: "application/json",
+        payload: JSON.stringify({
+          channel: queueData.channel,
+          ts: queueData.ts,
+          text: "審査ボタン",
+          blocks: updatedBlocks
+        }),
+        muteHttpExceptions: true,
+      });
+      
+      paperLog("[processNGFromQueue] 「処理中...」メッセージ表示完了", "fileId=" + queueData.fileId);
+    } catch (updateErr) {
+      paperLog("[ERROR] [processNGFromQueue] 「処理中...」メッセージ表示エラー", "error=" + String(updateErr));
+    }
+    
+    // 2. ファイルを NG フォルダへ移動
+    moveFile(queueData.fileId, STATUS.rejected, queueData.reason, queueData.includeReasonInEmail);
+    
+    // 3. 監査ログを記録
+    logAudit("NG", queueData.fileId, queueData.fileName, queueData.userId, queueData.reason, queueData.channel, queueData.ts);
+    
+    // 4. メッセージを最終状態に更新
+    try {
+      let updatedBlocks = JSON.parse(JSON.stringify(queueData.blocks || []));
+      updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
+      updatedBlocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${queueData.userId}>：${escapeMrkdwn(queueData.reason)}） → NGフォルダへ移動しました` }]
+      });
+      
+      UrlFetchApp.fetch("https://slack.com/api/chat.update", {
+        method: "post",
+        headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+        contentType: "application/json",
+        payload: JSON.stringify({
+          channel: queueData.channel,
+          ts: queueData.ts,
+          text: "審査ボタン",
+          blocks: updatedBlocks
+        }),
+        muteHttpExceptions: true,
+      });
+      
+      paperLog("[processNGFromQueue] メッセージ更新成功", "fileId=" + queueData.fileId);
+    } catch (updateErr) {
+      paperLog("[ERROR] [processNGFromQueue] メッセージ更新エラー", "error=" + String(updateErr));
+    }
+    
+    paperLog("[processNGFromQueue] NG処理完了", "fileId=" + queueData.fileId);
+  } catch (err) {
+    paperLog("[ERROR] [processNGFromQueue] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    
+    // エラーメッセージをスレッドに投稿
+    try {
+      UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+        method: "post",
+        headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+        contentType: "application/json",
+        payload: JSON.stringify({
+          channel: queueData.channel,
+          thread_ts: queueData.ts,
+          text: `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`
+        }),
+        muteHttpExceptions: true,
+      });
+    } catch (postErr) {
+      paperLog("[ERROR] [processNGFromQueue] エラーメッセージ投稿失敗", "error=" + String(postErr));
+    }
+  }
+}
+
+// =========================
+// 非同期NG処理（旧実装 - 互換性のため残す）
 // =========================
 
 /**
@@ -1025,11 +1195,10 @@ function handleSlackInteractivity(event) {
       paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason, "includeReasonInEmail=" + includeReasonInEmail);
 
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
-      // 「処理中...」メッセージも含めて、すべての処理を非同期リクエストで実行
+      // 処理データをキューに保存し、すぐにレスポンスを返す
       
       try {
-        const asyncPayload = {
-          action: "processNG",
+        const queueData = {
           fileId: meta.fileId,
           fileName: meta.name,
           reason: reason,
@@ -1037,22 +1206,16 @@ function handleSlackInteractivity(event) {
           userId: userId,
           channel: meta.channel,
           ts: meta.ts,
-          blocks: meta.blocks
+          blocks: meta.blocks,
+          timestamp: new Date().toISOString()
         };
         
-        const scriptUrl = ScriptApp.getService().getUrl();
+        // キューに保存（軽い処理）
+        enqueueNGProcessing(queueData);
         
-        // 非同期リクエストを送信（レスポンスを待たない）
-        UrlFetchApp.fetch(scriptUrl, {
-          method: "post",
-          contentType: "application/json",
-          payload: JSON.stringify(asyncPayload),
-          muteHttpExceptions: true,
-        });
-        
-        paperLog("[handleSlackInteractivity] 非同期処理リクエストを送信", "fileId=" + meta.fileId);
-      } catch (asyncErr) {
-        paperLog("[ERROR] [handleSlackInteractivity] 非同期処理リクエスト送信エラー", "error=" + String(asyncErr));
+        paperLog("[handleSlackInteractivity] NG処理をキューに追加", "fileId=" + meta.fileId);
+      } catch (queueErr) {
+        paperLog("[ERROR] [handleSlackInteractivity] キュー追加エラー", "error=" + String(queueErr));
       }
 
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
