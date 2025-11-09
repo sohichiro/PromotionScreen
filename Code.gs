@@ -722,13 +722,40 @@ function handleAsyncNGProcessing(payload) {
   paperLog("[handleAsyncNGProcessing] 非同期NG処理開始", "fileId=" + payload.fileId);
   
   try {
-    // ファイルを NG フォルダへ移動
+    // 1. まず「処理中...」メッセージを表示
+    try {
+      let updatedBlocks = JSON.parse(JSON.stringify(payload.blocks || []));
+      updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
+      updatedBlocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${payload.userId}>：${escapeMrkdwn(payload.reason)}） → 処理中...` }]
+      });
+      
+      UrlFetchApp.fetch("https://slack.com/api/chat.update", {
+        method: "post",
+        headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+        contentType: "application/json",
+        payload: JSON.stringify({
+          channel: payload.channel,
+          ts: payload.ts,
+          text: "審査ボタン",
+          blocks: updatedBlocks
+        }),
+        muteHttpExceptions: true,
+      });
+      
+      paperLog("[handleAsyncNGProcessing] 「処理中...」メッセージ表示完了", "fileId=" + payload.fileId);
+    } catch (updateErr) {
+      paperLog("[ERROR] [handleAsyncNGProcessing] 「処理中...」メッセージ表示エラー", "error=" + String(updateErr));
+    }
+    
+    // 2. ファイルを NG フォルダへ移動
     moveFile(payload.fileId, STATUS.rejected, payload.reason, payload.includeReasonInEmail);
     
-    // 監査ログを記録
+    // 3. 監査ログを記録
     logAudit("NG", payload.fileId, payload.fileName, payload.userId, payload.reason, payload.channel, payload.ts);
     
-    // メッセージを最終状態に更新
+    // 4. メッセージを最終状態に更新
     try {
       let updatedBlocks = JSON.parse(JSON.stringify(payload.blocks || []));
       updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
@@ -998,34 +1025,8 @@ function handleSlackInteractivity(event) {
       paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason, "includeReasonInEmail=" + includeReasonInEmail);
 
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
-      // 重い処理を実行する前に、非同期リクエストを送信してすぐにレスポンスを返す
+      // 「処理中...」メッセージも含めて、すべての処理を非同期リクエストで実行
       
-      // まず「処理中...」メッセージを表示
-      try {
-        let updatedBlocks = JSON.parse(JSON.stringify(meta.blocks || []));
-        updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
-        updatedBlocks.push({
-          type: "context",
-          elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → 処理中...` }]
-        });
-
-        UrlFetchApp.fetch("https://slack.com/api/chat.update", {
-          method: "post",
-          headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-          contentType: "application/json",
-          payload: JSON.stringify({
-            channel: meta.channel,
-            ts: meta.ts,
-            text: "審査ボタン",
-            blocks: updatedBlocks
-          }),
-          muteHttpExceptions: true,
-        });
-      } catch (updateErr) {
-        paperLog("[ERROR] [handleSlackInteractivity] NG: 初回メッセージ更新エラー", "error=" + String(updateErr));
-      }
-
-      // 重い処理を非同期で実行するため、自分自身のエンドポイントにリクエストを送信
       try {
         const asyncPayload = {
           action: "processNG",
@@ -1047,45 +1048,15 @@ function handleSlackInteractivity(event) {
           contentType: "application/json",
           payload: JSON.stringify(asyncPayload),
           muteHttpExceptions: true,
-          // タイムアウトを短く設定して、すぐにレスポンスを返せるようにする
-          // ただし、Apps Scriptではこのリクエストは完了まで実行される
         });
         
         paperLog("[handleSlackInteractivity] 非同期処理リクエストを送信", "fileId=" + meta.fileId);
       } catch (asyncErr) {
         paperLog("[ERROR] [handleSlackInteractivity] 非同期処理リクエスト送信エラー", "error=" + String(asyncErr));
-        
-        // エラーの場合は直接処理を実行
-        try {
-          moveFile(meta.fileId, STATUS.rejected, reason, includeReasonInEmail);
-          logAudit("NG", meta.fileId, meta.name, userId, reason, meta.channel, meta.ts);
-          
-          // メッセージを最終状態に更新
-          let updatedBlocks = JSON.parse(JSON.stringify(meta.blocks || []));
-          updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
-          updatedBlocks.push({
-            type: "context",
-            elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → NGフォルダへ移動しました` }]
-          });
-
-          UrlFetchApp.fetch("https://slack.com/api/chat.update", {
-            method: "post",
-            headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-            contentType: "application/json",
-            payload: JSON.stringify({
-              channel: meta.channel,
-              ts: meta.ts,
-              text: "審査ボタン",
-              blocks: updatedBlocks
-            }),
-            muteHttpExceptions: true,
-          });
-        } catch (fallbackErr) {
-          paperLog("[ERROR] [handleSlackInteractivity] フォールバック処理エラー", "error=" + String(fallbackErr));
-        }
       }
 
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
+      // 何もせずにすぐにレスポンスを返す
       paperLog("[handleSlackInteractivity] view_submission処理完了、モーダルを閉じます");
       return ContentService.createTextOutput("")
         .setMimeType(ContentService.MimeType.TEXT);
