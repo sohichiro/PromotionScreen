@@ -254,13 +254,8 @@
 
 
 
+  <script src="assets/js/config.js"></script>
   <script>
-    // ====== 設定 ======
-    const API_BASE = 'https://script.google.com/macros/s/AKfycbyQlUmCl9kly50PDxOjY_1toWwU54dneAl2wIc2IfGiBEr36swoW9j2A2iFDGMsiCmTxA/exec'; // ★GASの実行URL
-    const SLIDE_MS = 30000;   // 1枚の表示時間
-    const FADE_MS = 2000;   // フェード時間
-    const HALF_LIFE_HOURS = 6; // 新しさ重み付けの半減期（短いほど新着を強く優遇）
-    const SHUFFLE_BATCH = 20; // 一度に候補に乗せる枚数（重み抽選の母集団上限）
 
     const layerA = document.getElementById('layerA');
     const layerB = document.getElementById('layerB');
@@ -617,4 +612,3 @@
 
 
 </html>
-
