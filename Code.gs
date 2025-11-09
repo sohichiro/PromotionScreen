@@ -538,27 +538,28 @@ function handleSlackInteractivity(event) {
       if (action.action_id === "ok_move") {
         console.log("[handleSlackInteractivity] OK処理開始", "fileId=" + val.fileId, "fileName=" + val.name);
         paperLog("[handleSlackInteractivity] OK処理開始", "fileId=" + val.fileId, "fileName=" + val.name);
+        paperLog("[handleSlackInteractivity] response_url確認", "url=" + (payload.response_url || "なし"));
+        paperLog("[handleSlackInteractivity] message.blocks確認", "hasBlocks=" + !!payload.message?.blocks, "blocksCount=" + (payload.message?.blocks?.length || 0));
         
         try {
-          // 処理開始を即時表示
-          replaceOriginalViaResponseUrl(
-            payload.response_url,
-            payload.message.blocks,
-            `⏳ 処理開始 by <@${userId}>`,
-            false
-          );
-
           // ファイルを OK フォルダへ移動
           console.log("[handleSlackInteractivity] moveFile呼び出し", "fileId=" + val.fileId);
           moveFile(val.fileId, STATUS.approved);
 
-          // 完了メッセージ + ボタン無効化
-          replaceOriginalViaResponseUrl(
-            payload.response_url,
-            payload.message.blocks,
-            `✅ 承認済み by <@${userId}> → OKフォルダへ移動しました`,
-            true
-          );
+          // 完了メッセージを投稿（replaceOriginalではなく新規メッセージ）
+          const successResp = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+            method: "post",
+            headers: {
+              Authorization: "Bearer " + CONFIG.slackBotToken
+            },
+            contentType: "application/json",
+            payload: JSON.stringify({
+              channel: channel,
+              thread_ts: ts,
+              text: `✅ 承認済み by <@${userId}> → OKフォルダへ移動しました`
+            }),
+            muteHttpExceptions: true,
+          });
           
           console.log("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
           paperLog("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
@@ -566,12 +567,18 @@ function handleSlackInteractivity(event) {
           console.error("[handleSlackInteractivity] OK処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
           paperLog("[handleSlackInteractivity] OK処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
           
-          replaceOriginalViaResponseUrl(
-            payload.response_url,
-            payload.message.blocks,
-            `⚠️ OK処理エラー: ${escapeMrkdwn(String(err))}`,
-            false
-          );
+          // エラーメッセージをスレッドに投稿
+          UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+            method: "post",
+            headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+            contentType: "application/json",
+            payload: JSON.stringify({
+              channel: channel,
+              thread_ts: ts,
+              text: `⚠️ OK処理エラー: ${escapeMrkdwn(String(err))}`
+            }),
+            muteHttpExceptions: true,
+          });
         }
         return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
       }
@@ -580,14 +587,18 @@ function handleSlackInteractivity(event) {
         try {
           openNgModal(payload.trigger_id, val, channel, ts, payload.response_url, payload.message.blocks);
         } catch (err) {
-          try {
-            replaceOriginalViaResponseUrl(
-              payload.response_url,
-              payload.message.blocks,
-              `⚠️ モーダル起動エラー: ${escapeMrkdwn(String(err))}`,
-              false
-            );
-          } catch (_) {}
+          // エラーメッセージをスレッドに投稿
+          UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+            method: "post",
+            headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+            contentType: "application/json",
+            payload: JSON.stringify({
+              channel: channel,
+              thread_ts: ts,
+              text: `⚠️ モーダル起動エラー: ${escapeMrkdwn(String(err))}`
+            }),
+            muteHttpExceptions: true,
+          });
         }
         return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
       }
@@ -604,21 +615,23 @@ function handleSlackInteractivity(event) {
       try {
         console.log("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
         paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
-        
-        // 処理開始を即時表示
-        replaceOriginalViaResponseUrl(meta.responseUrl, meta.blocks, `⏳ NG処理開始 by <@${userId}>`, false);
 
         // ファイルを NG フォルダへ移動
         console.log("[handleSlackInteractivity] moveFile呼び出し (NG)", "fileId=" + meta.fileId);
         moveFile(meta.fileId, STATUS.rejected);
 
-        // 完了メッセージ + ボタン無効化
-        replaceOriginalViaResponseUrl(
-          meta.responseUrl,
-          meta.blocks,
-          `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → NGフォルダへ移動しました`,
-          true
-        );
+        // 完了メッセージをスレッドに投稿
+        UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+          method: "post",
+          headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+          contentType: "application/json",
+          payload: JSON.stringify({
+            channel: meta.channel,
+            thread_ts: meta.ts,
+            text: `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → NGフォルダへ移動しました`
+          }),
+          muteHttpExceptions: true,
+        });
         
         console.log("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
         paperLog("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
@@ -626,12 +639,18 @@ function handleSlackInteractivity(event) {
         console.error("[handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
         paperLog("[handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
         
-        replaceOriginalViaResponseUrl(
-          meta.responseUrl,
-          meta.blocks,
-          `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`,
-          false
-        );
+        // エラーメッセージをスレッドに投稿
+        UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+          method: "post",
+          headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+          contentType: "application/json",
+          payload: JSON.stringify({
+            channel: meta.channel,
+            thread_ts: meta.ts,
+            text: `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`
+          }),
+          muteHttpExceptions: true,
+        });
       }
 
       // モーダルを閉じる
@@ -728,6 +747,9 @@ function openNgModal(triggerId, val, channel, ts, responseUrl, baseBlocks) {
 }
 
 function replaceOriginalViaResponseUrl(responseUrl, baseBlocks, statusLine, removeActions) {
+  console.log("[replaceOriginalViaResponseUrl] 開始", "url=" + (responseUrl || "なし"), "statusLine=" + statusLine);
+  paperLog("[replaceOriginalViaResponseUrl] 開始", "url=" + (responseUrl || "なし"), "statusLine=" + statusLine);
+  
   let blocks = JSON.parse(JSON.stringify(baseBlocks || []));
   if (removeActions) {
     blocks = blocks.filter((b) => b.type !== "actions");
@@ -746,8 +768,12 @@ function replaceOriginalViaResponseUrl(responseUrl, baseBlocks, statusLine, remo
   });
 
   const code = resp.getResponseCode();
+  const respText = resp.getContentText();
+  console.log("[replaceOriginalViaResponseUrl] レスポンス", "code=" + code, "body=" + respText.substring(0, 200));
+  paperLog("[replaceOriginalViaResponseUrl] レスポンス", "code=" + code, "body=" + respText.substring(0, 200));
+  
   if (code < 200 || code >= 300) {
-    throw new Error("response_url update failed: " + code + " " + resp.getContentText());
+    throw new Error("response_url update failed: " + code + " " + respText);
   }
 }
 
