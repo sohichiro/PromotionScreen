@@ -1221,14 +1221,17 @@ function handleSlackInteractivity(event) {
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
       // 何もせずにすぐにレスポンスを返す
       paperLog("[handleSlackInteractivity] view_submission処理完了、モーダルを閉じます");
-      return ContentService.createTextOutput("")
-        .setMimeType(ContentService.MimeType.TEXT);
+      return ContentService.createTextOutput(
+        JSON.stringify({ response_action: "clear" })
+      ).setMimeType(ContentService.MimeType.JSON);
     }
 
-    return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
+    return ContentService.createTextOutput(JSON.stringify({ ok: true }))
+      .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     paperLog("[ERROR] Slack Interactivity エラー:", err);
-    return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
+    return ContentService.createTextOutput(JSON.stringify({ error: "error" }))
+      .setMimeType(ContentService.MimeType.JSON);
   }
 }
 
