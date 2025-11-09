@@ -178,8 +178,10 @@ function buildCorsResponse() {
 }
 
 function applyCorsHeaders(output) {
-  output.setHeader("Access-Control-Allow-Origin", "*");
-  output.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  output.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  output.setHeaders({
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  });
 }
 
