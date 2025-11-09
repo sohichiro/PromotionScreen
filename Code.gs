@@ -149,59 +149,86 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   console.log("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"));
   paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId);
   
-  // ステップ1: 画像をSlackにアップロード（files.uploadV2を使用）
-  console.log("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
-  paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
+  // ステップ1: アップロードURLを取得（files.getUploadURLExternal）
+  console.log("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
+  paperLog("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
   
   const blob = file.getBlob();
-  const boundary = "----WebKitFormBoundary" + Utilities.getUuid().replace(/-/g, "");
+  const fileSize = blob.getBytes().length;
   
-  // multipart/form-dataを構築
-  const header = Utilities.newBlob(
-    "--" + boundary + "\r\n" +
-    "Content-Disposition: form-data; name=\"channels\"\r\n\r\n" +
-    CONFIG.slackChannelId + "\r\n" +
-    "--" + boundary + "\r\n" +
-    "Content-Disposition: form-data; name=\"initial_comment\"\r\n\r\n" +
-    `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}\n\n<${fileUrl}|📷 Driveで画像を開く>` + "\r\n" +
-    "--" + boundary + "\r\n" +
-    "Content-Disposition: form-data; name=\"file\"; filename=\"" + file.getName() + "\"\r\n" +
-    "Content-Type: " + blob.getContentType() + "\r\n\r\n"
-  ).getBytes();
-  
-  const footer = Utilities.newBlob("\r\n--" + boundary + "--\r\n").getBytes();
-  const fileBytes = blob.getBytes();
-  
-  // バイト配列を結合
-  const payloadBytes = [];
-  for (var i = 0; i < header.length; i++) payloadBytes.push(header[i]);
-  for (var i = 0; i < fileBytes.length; i++) payloadBytes.push(fileBytes[i]);
-  for (var i = 0; i < footer.length; i++) payloadBytes.push(footer[i]);
-  
-  const uploadResp = UrlFetchApp.fetch("https://slack.com/api/files.upload", {
+  const urlResp = UrlFetchApp.fetch("https://slack.com/api/files.getUploadURLExternal", {
     method: "post",
     headers: {
       "Authorization": "Bearer " + CONFIG.slackBotToken,
-      "Content-Type": "multipart/form-data; boundary=" + boundary
+      "Content-Type": "application/json; charset=utf-8"
     },
-    payload: payloadBytes,
+    payload: JSON.stringify({
+      filename: file.getName(),
+      length: fileSize
+    }),
+    muteHttpExceptions: true,
+  });
+
+  const urlData = JSON.parse(urlResp.getContentText() || "{}");
+  if (!urlData.ok) {
+    console.error("[postPhotoToSlackWithBlockKit] URL取得エラー", "error=" + urlResp.getContentText());
+    paperLog("[postPhotoToSlackWithBlockKit] URL取得エラー", "error=" + urlResp.getContentText());
+    return;
+  }
+
+  console.log("[postPhotoToSlackWithBlockKit] URL取得成功", "upload_url=" + (urlData.upload_url ? "取得済み" : "なし"));
+  paperLog("[postPhotoToSlackWithBlockKit] URL取得成功");
+
+  // ステップ2: 画像をアップロード
+  console.log("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
+  paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
+  
+  const uploadResp = UrlFetchApp.fetch(urlData.upload_url, {
+    method: "post",
+    payload: blob,
     muteHttpExceptions: true,
   });
 
   const uploadCode = uploadResp.getResponseCode();
-  const uploadText = uploadResp.getContentText();
-  console.log("[postPhotoToSlackWithBlockKit] 画像アップロードレスポンス", "statusCode=" + uploadCode, "response=" + uploadText.substring(0, 500));
-  paperLog("[postPhotoToSlackWithBlockKit] 画像アップロードレスポンス", "statusCode=" + uploadCode);
-
-  const uploadData = JSON.parse(uploadText || "{}");
-  if (!uploadData.ok) {
-    console.error("[postPhotoToSlackWithBlockKit] 画像アップロードエラー", "error=" + uploadText);
-    paperLog("[postPhotoToSlackWithBlockKit] 画像アップロードエラー", "error=" + uploadText);
+  if (uploadCode < 200 || uploadCode >= 300) {
+    console.error("[postPhotoToSlackWithBlockKit] 画像アップロードエラー", "statusCode=" + uploadCode);
+    paperLog("[postPhotoToSlackWithBlockKit] 画像アップロードエラー", "statusCode=" + uploadCode);
     return;
   }
 
-  console.log("[postPhotoToSlackWithBlockKit] 画像アップロード成功", "file_id=" + (uploadData.file?.id || "なし"));
+  console.log("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
   paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
+
+  // ステップ3: アップロード完了を通知（files.completeUploadExternal）
+  console.log("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
+  paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
+  
+  const completeResp = UrlFetchApp.fetch("https://slack.com/api/files.completeUploadExternal", {
+    method: "post",
+    headers: {
+      "Authorization": "Bearer " + CONFIG.slackBotToken,
+      "Content-Type": "application/json; charset=utf-8"
+    },
+    payload: JSON.stringify({
+      files: [{
+        id: urlData.file_id,
+        title: file.getName()
+      }],
+      channel_id: CONFIG.slackChannelId,
+      initial_comment: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}\n\n<${fileUrl}|📷 Driveで画像を開く>`
+    }),
+    muteHttpExceptions: true,
+  });
+
+  const completeData = JSON.parse(completeResp.getContentText() || "{}");
+  if (!completeData.ok) {
+    console.error("[postPhotoToSlackWithBlockKit] アップロード完了通知エラー", "error=" + completeResp.getContentText());
+    paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知エラー", "error=" + completeResp.getContentText());
+    return;
+  }
+
+  console.log("[postPhotoToSlackWithBlockKit] アップロード完了");
+  paperLog("[postPhotoToSlackWithBlockKit] アップロード完了");
 
   // ステップ2: ボタンを別のメッセージとして投稿
   const blocks = [
