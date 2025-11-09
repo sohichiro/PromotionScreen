@@ -92,29 +92,6 @@ const toBase64 = (file) =>
     reader.readAsDataURL(file);
   });
 
-const postWithFallback = async (endpoint, payload) => {
-  const requestInit = {
-    method: "POST",
-    body: JSON.stringify(payload),
-  };
-
-  try {
-    const response = await fetch(endpoint, requestInit);
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || "アップロードに失敗しました。");
-    }
-    return {
-      payload: await response.json().catch(() => ({})),
-      viaFallback: false,
-    };
-  } catch (error) {
-    console.warn("CORS エラーが発生したため、no-cors モードで再送信します。", error);
-    await fetch(endpoint, { ...requestInit, mode: "no-cors" });
-    return { payload: {}, viaFallback: true };
-  }
-};
-
 const submitPhoto = async () => {
   const endpoint = window.UPLOAD_ENDPOINT;
 
@@ -133,7 +110,13 @@ const submitPhoto = async () => {
     photoBase64: base64,
   };
 
-  return postWithFallback(endpoint, payload);
+  await fetch(endpoint, {
+    method: "POST",
+    mode: "no-cors",
+    body: JSON.stringify(payload),
+  });
+
+  return {};
 };
 
 photoInput.addEventListener("change", () => {
@@ -157,16 +140,11 @@ form.addEventListener("submit", async (event) => {
   setStatus({ status: "loading", message: "アップロード中…", details: "通信が完了するまでこのままお待ちください。" });
 
   try {
-    const { payload: responsePayload, viaFallback } = await submitPhoto();
-    const receiptId = responsePayload?.id || responsePayload?.fileId || "";
+    await submitPhoto();
     setStatus({
       status: "success",
       message: "送信が完了しました！",
-      details: receiptId
-        ? `受付番号: ${receiptId}`
-        : viaFallback
-          ? "Google Apps Script 側で受付しました。結果が反映されるまで少しお待ちください。"
-          : "ご協力ありがとうございます。",
+      details: "ご協力ありがとうございます。",
     });
     form.reset();
     preview.classList.remove("preview--has-image");
