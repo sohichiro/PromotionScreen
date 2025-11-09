@@ -149,20 +149,42 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   console.log("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"));
   paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId);
   
-  // ステップ1: 画像をSlackにアップロード
+  // ステップ1: 画像をSlackにアップロード（files.uploadV2を使用）
   console.log("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
   paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
   
   const blob = file.getBlob();
+  const boundary = "----WebKitFormBoundary" + Utilities.getUuid().replace(/-/g, "");
+  
+  // multipart/form-dataを構築
+  const header = Utilities.newBlob(
+    "--" + boundary + "\r\n" +
+    "Content-Disposition: form-data; name=\"channels\"\r\n\r\n" +
+    CONFIG.slackChannelId + "\r\n" +
+    "--" + boundary + "\r\n" +
+    "Content-Disposition: form-data; name=\"initial_comment\"\r\n\r\n" +
+    `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}\n\n<${fileUrl}|📷 Driveで画像を開く>` + "\r\n" +
+    "--" + boundary + "\r\n" +
+    "Content-Disposition: form-data; name=\"file\"; filename=\"" + file.getName() + "\"\r\n" +
+    "Content-Type: " + blob.getContentType() + "\r\n\r\n"
+  ).getBytes();
+  
+  const footer = Utilities.newBlob("\r\n--" + boundary + "--\r\n").getBytes();
+  const fileBytes = blob.getBytes();
+  
+  // バイト配列を結合
+  const payload = [];
+  for (var i = 0; i < header.length; i++) payload.push(header[i]);
+  for (var i = 0; i < fileBytes.length; i++) payload.push(fileBytes[i]);
+  for (var i = 0; i < footer.length; i++) payload.push(footer[i]);
+  
   const uploadResp = UrlFetchApp.fetch("https://slack.com/api/files.upload", {
     method: "post",
-    headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-    payload: {
-      channels: CONFIG.slackChannelId,
-      file: blob,
-      filename: file.getName(),
-      initial_comment: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}\n\n<${fileUrl}|📷 Driveで画像を開く>`,
+    headers: {
+      "Authorization": "Bearer " + CONFIG.slackBotToken,
+      "Content-Type": "multipart/form-data; boundary=" + boundary
     },
+    payload: payload,
     muteHttpExceptions: true,
   });
 
