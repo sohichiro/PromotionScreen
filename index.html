@@ -1,22 +1,640 @@
 <!DOCTYPE html>
+
 <html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Redirecting…</title>
-    <meta http-equiv="refresh" content="0; url=./public/index.html" />
-    <link rel="canonical" href="./public/index.html" />
-    <script>
-      window.location.replace('./public/index.html');
-    </script>
-    <style>
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", Arial, sans-serif; margin:0; min-height:100vh; display:grid; place-items:center; }
-      a { color: #2563eb; }
-    </style>
-  </head>
-  <body>
-    <p>サイネージページへ移動します。切り替わらない場合は <a href="./public/index.html">こちら</a>。</p>
-  </body>
-  </html>
 
 
+
+<head>
+
+  <meta charset="utf-8" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <meta name="theme-color" content="#000000">
+
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+
+
+
+  <title>Drive Slideshow</title>
+
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #000;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", Arial, sans-serif;
+    }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: #000;
+      display: grid;
+      place-items: center;
+      cursor: none;
+    }
+
+    .layer {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      opacity: 0;
+      transition: opacity 1000ms ease;
+      background: #000;
+    }
+
+    .layer.show {
+      opacity: 1;
+    }
+
+    img {
+      max-width: 100vw;
+      max-height: 100vh;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      image-rendering: auto;
+      background: #000;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    #hud {
+      position: absolute;
+      right: 12px;
+      bottom: 10px;
+      left: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      opacity: 0;
+      transition: opacity .3s ease;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .8);
+      pointer-events: none;
+    }
+
+    .pill {
+      background: rgba(0, 0, 0, .45);
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .6);
+      display: inline-block;
+      margin-left: 6px;
+    }
+
+    .dot.on {
+      background: #fff;
+    }
+
+    #hint {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .6);
+      background: rgba(0, 0, 0, .35);
+      padding: 6px 10px;
+      border-radius: 8px;
+      opacity: 0;
+      transition: opacity .3s ease;
+    }
+
+    #statusbar {
+      position: absolute;
+      left: 12px;
+      bottom: calc(env(safe-area-inset-bottom) + 12px);
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-start;
+      max-width: min(80vw, 900px);
+      padding: 6px 10px;
+      background: rgba(0, 0, 0, .35);
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, .15);
+      border-radius: 10px;
+      font-size: 12px;
+      color: #fff;
+      z-index: 15;
+      pointer-events: none;
+      /* バッジは触れなくてOK */
+      opacity: 0;
+      transition: opacity .3s ease;
+    }
+
+    #clock {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      opacity: .95
+    }
+
+    #badges {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .badge {
+      background: rgba(255, 255, 255, .12);
+      border: 1px solid rgba(255, 255, 255, .18);
+      padding: 4px 8px;
+      border-radius: 999px;
+      pointer-events: auto;
+    }
+
+    .badge.ok {
+      background: rgba(46, 204, 113, .2);
+      border-color: rgba(46, 204, 113, .35);
+    }
+
+    .badge.warn {
+      background: rgba(241, 196, 15, .2);
+      border-color: rgba(241, 196, 15, .35);
+    }
+
+    .badge.err {
+      background: rgba(231, 76, 60, .2);
+      border-color: rgba(231, 76, 60, .35);
+    }
+
+    .badge.button {
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+
+    .badge.button:hover {
+      opacity: 0.8;
+    }
+
+    .badge.button:active {
+      opacity: 0.6;
+    }
+
+    #clock-fixed {
+      position: absolute;
+      right: calc(env(safe-area-inset-right) + 16px);
+      bottom: calc(env(safe-area-inset-bottom) + 16px);
+      font-size: 26px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.7);
+      pointer-events: none;
+      /* 触れられなくてOK */
+      z-index: 20;
+    }
+
+    #hud {
+      position: absolute;
+      top: calc(env(safe-area-inset-top) + 12px);
+      right: calc(env(safe-area-inset-right) + 12px);
+      left: auto;
+      bottom: auto;
+      /* ← 下・左の固定は解除 */
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      opacity: 0;
+      transition: opacity .3s ease;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .8);
+      pointer-events: none;
+      z-index: 14;
+    }
+
+    body.status-visible #statusbar,
+    body.status-visible #hint {
+      opacity: 1;
+    }
+
+    body.status-visible #hud {
+      opacity: .95;
+    }
+  </style>
+
+</head>
+
+
+
+<body>
+
+  <div id="stage">
+
+    <div id="statusbar">
+
+
+
+      <div id="badges">
+
+        <span class="badge" id="badge-state">Loading</span>
+
+        <span class="badge" id="badge-net">Offline</span>
+
+        <span class="badge" id="badge-count">0 photos</span>
+
+        <span class="badge" id="badge-updated">—</span>
+
+        <span class="badge button" id="badge-reload" style="display: none;">再読み込み</span>
+
+      </div>
+    </div>
+    <div id="layerA" class="layer"></div>
+    <div id="layerB" class="layer"></div>
+    <div id="clock-fixed">--:--:--</div>
+    <div id="hint">トリプルタップでステータス表示 / 表示中はダブルタップで全画面 / 2本指で一時停止</div>
+    <div id="hud">
+      <div class="pill" id="status">—</div>
+    </div>
+
+  </div>
+
+
+
+  <script src="assets/js/config.js"></script>
+  <script>
+
+    const layerA = document.getElementById('layerA');
+    const layerB = document.getElementById('layerB');
+    const statusEl = document.getElementById('status');
+    let currentLayer = layerA;
+    let nextLayer = layerB;
+    let items = []; // {url, updatedAt, ...}
+    let timer = null;
+    let running = true;
+
+    // ★ 追加: ループ管理
+    let loopHandle = null;
+    let inFlight = false;   // 遷移の同時実行防止
+    let lastSwapAt = 0;     // 最後に画像が画面に出た時刻（ms）
+
+    // === UI 表示/非表示トグル ===
+    let statusVisible = false; // 初期状態: 非表示
+    const badgeReload = document.getElementById('badge-reload');
+    function setStatusVisible(v) {
+      statusVisible = v;
+      document.body.classList.toggle('status-visible', v);
+      // ステータス表示時に再読み込みボタンを表示
+      badgeReload.style.display = v ? 'block' : 'none';
+    }
+    // 起動時に反映
+    setStatusVisible(statusVisible);
+
+    // トリプル/ダブルタップを判定
+    const stage = document.getElementById('stage');
+    const TAP_TIMEOUT_MS = 400;
+    let tapCount = 0;
+    let tapTimerId = null;
+
+    function resetTapSequence() {
+      tapCount = 0;
+      if (tapTimerId) {
+        clearTimeout(tapTimerId);
+        tapTimerId = null;
+      }
+    }
+
+    function handleTapGesture() {
+      tapCount += 1;
+
+      if (tapCount === 3) {
+        setStatusVisible(!statusVisible);
+        resetTapSequence();
+        return;
+      }
+
+      if (tapTimerId) clearTimeout(tapTimerId);
+      tapTimerId = setTimeout(() => {
+        if (tapCount === 2 && statusVisible) {
+          toggleFullscreen();
+        }
+        resetTapSequence();
+      }, TAP_TIMEOUT_MS);
+    }
+
+    let multiTouchGesture = false;
+
+    stage.addEventListener('pointerup', (ev) => {
+      if (!ev.isPrimary) return;
+      if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+      if (ev.pointerType === 'touch') {
+        if (multiTouchGesture) return;
+        ev.preventDefault();
+      }
+      handleTapGesture();
+    });
+
+    // --- Topbar elements
+    const badgeState = document.getElementById('badge-state');
+    const badgeNet = document.getElementById('badge-net');
+    const badgeCount = document.getElementById('badge-count');
+    const badgeUpdated = document.getElementById('badge-updated');
+    const clockEl = document.getElementById('clock-fixed');
+
+    // 状態セット
+    function setAppState(kind, extraText) {
+      // kind: 'loading' | 'playing' | 'paused' | 'updating' | 'error'
+      const map = {
+        loading: { text: 'Loading', cls: 'warn' },
+        playing: { text: 'Playing', cls: 'ok' },
+        paused: { text: 'Paused', cls: 'warn' },
+        updating: { text: 'Updating', cls: 'warn' },
+        error: { text: 'Error', cls: 'err' },
+      };
+      const m = map[kind] || { text: String(kind), cls: '' };
+      badgeState.classList.remove('ok', 'warn', 'err');
+      if (m.cls) badgeState.classList.add(m.cls);
+      badgeState.textContent = extraText ? `${m.text}: ${extraText}` : m.text;
+    }
+
+    // ネットワーク表示
+    function refreshNetBadge() {
+      const online = navigator.onLine;
+      badgeNet.classList.remove('ok', 'warn', 'err');
+      badgeNet.classList.add(online ? 'ok' : 'err');
+      badgeNet.textContent = online ? 'Online' : 'Offline';
+    }
+    window.addEventListener('online', refreshNetBadge);
+    window.addEventListener('offline', refreshNetBadge);
+    refreshNetBadge();
+
+    // 時計
+    function tickClock() {
+      const d = new Date();
+      clockEl.textContent = d.toLocaleTimeString('ja-JP', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+    tickClock();
+    setInterval(tickClock, 1000);
+
+    // JSONの日時を人間向けに
+    function fmtTime(s) {
+      try { return new Date(s).toLocaleString('ja-JP'); } catch { return s; }
+    }
+
+    function status(msg) { statusEl.textContent = msg; }
+
+    async function fetchList() {
+      setAppState('updating');
+      status('読み込み中…');
+
+      // 15秒タイムアウト
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 15000);
+
+      try {
+        const res = await fetch(`${API_BASE}?fn=list`, {
+          cache: 'no-store',
+          signal: ctrl.signal
+        });
+
+        // ステータス非200でも本文をログ
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          console.error('list non-OK', res.status, text);
+          status(`読み込み失敗 (${res.status})`);
+          return;
+        }
+
+        let json;
+        try {
+          json = await res.json();
+        } catch (e) {
+          const text = await res.text().catch(() => '');
+          console.error('JSON parse error. body=', text);
+          status('JSON解析エラー');
+          return;
+        }
+
+        // 旧URLなら img64 に差し替え（既に入れてる場合はそのままでOK）
+        items = (json.items || []).map(it => {
+          const u = new URL(it.url, location.href);
+          if (u.searchParams.get('fn') === 'image') u.searchParams.set('fn', 'img64');
+          return { ...it, url: u.toString() };
+        });
+
+        badgeCount.textContent = `${items.length} photos`;
+        badgeUpdated.textContent = `Updated ${fmtTime(json.now)}`;
+
+        if (!items.length) {
+          status('画像が見つかりません（フォルダ/権限を確認）');
+          setAppState('warn', 'No images');
+          return;
+        }
+        status(`画像 ${items.length} 枚 / 更新 ${fmtTime(json.now)}`);
+        // 実行中かどうかで状態
+        setAppState(running ? 'playing' : 'paused');
+      } catch (e) {
+        console.error('fetch list error', e);
+        status(e.name === 'AbortError' ? 'タイムアウト' : '通信エラー');
+      } finally {
+        clearTimeout(to);
+      }
+    }
+
+    // 新しさ優遇の重み抽選：重み = exp(-(経過時間)/tau)
+    function pickNextWeighted() {
+      if (!items.length) return null;
+      const now = Date.now();
+      const tau = HALF_LIFE_HOURS * 3600 * 1000 / Math.log(2); // 半減期→時定数
+      const pool = items.slice(0, Math.min(items.length, SHUFFLE_BATCH)); // 先頭は新しい順
+      const weights = pool.map(it => {
+        const age = Math.max(0, now - new Date(it.updatedAt).getTime());
+        return Math.exp(-age / tau);
+      });
+      const sum = weights.reduce((a, b) => a + b, 0);
+      let r = Math.random() * sum;
+      for (let i = 0; i < pool.length; i++) {
+        r -= weights[i];
+        if (r <= 0) return pool[i];
+      }
+      return pool[pool.length - 1];
+    }
+
+    async function preload(url) {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 15000);
+      try {
+        const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status} ${text?.slice(0, 200)}`);
+        }
+        let payload;
+        try {
+          payload = await res.json();
+        } catch (e) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`JSON解析失敗 ${text?.slice(0, 200)}`);
+        }
+        if (payload?.error) {
+          // エラー本文をそのまま可視化
+          throw new Error(`img64 error: ${payload.error}`);
+        }
+        const mime = payload?.mime || 'image/jpeg';
+        const b64 = payload?.data;
+        if (!b64) throw new Error('data欠落');
+
+        const src = `data:${mime};base64,${b64}`;
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = src;
+        await new Promise((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('img onerror'));
+          setTimeout(() => resolve(), 0);
+        });
+        return img;
+      } finally {
+        clearTimeout(to);
+      }
+    }
+
+    async function showNext() {
+      if (inFlight) return;       // ★ 二重起動ガード
+      inFlight = true;
+      try {
+        const it = pickNextWeighted();
+        if (!it) { status('候補がありません'); return; }
+
+        // どのURLで落ちてるか一緒に表示
+        //status(`読み込み: ${it.name || ''}\n${it.url}`);
+        setAppState('loading', it.name || '');
+        status(`読み込み: ${it.name || ''}`);
+
+        const img = await preload(it.url);
+
+        nextLayer.innerHTML = '';
+        nextLayer.appendChild(img);
+        nextLayer.classList.add('show');
+        currentLayer.classList.remove('show');
+        [currentLayer, nextLayer] = [nextLayer, currentLayer];
+        // この瞬間から表示時間カウント開始
+        lastSwapAt = Date.now();
+        status('');
+        setAppState(running ? 'playing' : 'paused');
+      } catch (e) {
+        console.error('showNext error', e);
+        status(`読み込みエラー: ${String(e).slice(0, 300)}`);
+        setAppState('error', 'Render');
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    // ★ 追加: 次の遷移を予約（setIntervalをやめる）
+    function scheduleNext(afterMs) {
+      if (loopHandle) clearTimeout(loopHandle);
+      loopHandle = setTimeout(async () => {
+        if (!running) {
+          // 一時停止中は短い間隔で再チェック
+          scheduleNext(500);
+          return;
+        }
+
+        // まだ最低表示時間に満たない場合は延長
+        const elapsed = Date.now() - lastSwapAt;
+        if (elapsed < SLIDE_MS) {
+          scheduleNext(SLIDE_MS - elapsed);
+          return;
+        }
+
+        await showNext();
+        // 次回も「画面に出してから」SLIDE_MS後
+        scheduleNext(SLIDE_MS);
+      }, Math.max(0, afterMs));
+    }
+
+    function startLoop() {
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => { if (running) showNext(); }, SLIDE_MS);
+    }
+
+    // 全画面切替（iPhone Safari）
+    async function toggleFullscreen() {
+      const el = document.documentElement;
+      try {
+        if (!document.fullscreenElement) {
+          if (el.requestFullscreen) await el.requestFullscreen();
+        } else {
+          await document.exitFullscreen();
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // 初期化
+    (async () => {
+      await fetchList();
+      if (!items.length) return;
+
+      // 最初の1枚をすぐ表示
+      await showNext();
+      currentLayer.classList.add('show');
+      //startLoop();
+      scheduleNext(SLIDE_MS);
+
+      // 5分おきに最新リストを再取得（新規ファイル追加を拾う）
+      setInterval(fetchList, 5 * 60 * 1000);
+    })();
+
+    // タップでフルスクリーン
+    document.getElementById('stage').addEventListener('click', () => toggleFullscreen());
+    // 2本指タップで一時停止/再開（ガイド中の簡易操作）
+    window.addEventListener('touchstart', (ev) => {
+      if (ev.touches.length === 2) {
+        running = !running;
+        status(running ? '再開' : '一時停止');
+        setAppState(running ? 'playing' : 'paused');
+        if (running) scheduleNext(SLIDE_MS);
+        setTimeout(() => status(''), 1500);
+      }
+      if (ev.touches.length > 1) {
+        multiTouchGesture = true;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', (ev) => {
+      if (ev.touches.length === 0) {
+        multiTouchGesture = false;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchcancel', () => {
+      multiTouchGesture = false;
+    }, { passive: true });
+
+    // 再読み込みボタンのクリックイベント
+    badgeReload.addEventListener('click', async () => {
+      badgeReload.textContent = '読み込み中...';
+      badgeReload.style.pointerEvents = 'none';
+      await fetchList();
+      badgeReload.textContent = '再読み込み';
+      badgeReload.style.pointerEvents = 'auto';
+    });
+  </script>
+
+</body>
+
+
+
+</html>
