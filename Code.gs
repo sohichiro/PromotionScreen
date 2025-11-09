@@ -117,16 +117,26 @@ function doPost(event) {
       return handleSlackInteractivity(event);
     }
 
-    // 画像アップロード処理
-    if (CONFIG.debugMode) {
-      paperLog("[doPost] 画像アップロード処理を開始");
-    }
+    // リクエストボディを解析
     if (!event?.postData?.contents) {
       paperLog("[doPost] エラー: リクエストデータが空");
       return buildErrorResponse("リクエストデータが空です。", 400);
     }
 
     const payload = JSON.parse(event.postData.contents);
+    
+    // 非同期NG処理リクエストの場合
+    if (payload.action === "processNG") {
+      if (CONFIG.debugMode) {
+        paperLog("[doPost] 非同期NG処理リクエストとして処理");
+      }
+      return handleAsyncNGProcessing(payload);
+    }
+
+    // 画像アップロード処理
+    if (CONFIG.debugMode) {
+      paperLog("[doPost] 画像アップロード処理を開始");
+    }
     if (CONFIG.debugMode) {
       paperLog("[doPost] ペイロード解析完了", "filename=" + (payload.filename || "なし"), "hasPhotoBase64=" + !!payload.photoBase64);
     }
@@ -701,6 +711,77 @@ function addHeaders_(output, headers, status) {
   return resp;
 }
 // =========================
+// 非同期NG処理
+// =========================
+
+/**
+ * 非同期でNG処理を実行する
+ * @param {Object} payload - 処理データ
+ */
+function handleAsyncNGProcessing(payload) {
+  paperLog("[handleAsyncNGProcessing] 非同期NG処理開始", "fileId=" + payload.fileId);
+  
+  try {
+    // ファイルを NG フォルダへ移動
+    moveFile(payload.fileId, STATUS.rejected, payload.reason, payload.includeReasonInEmail);
+    
+    // 監査ログを記録
+    logAudit("NG", payload.fileId, payload.fileName, payload.userId, payload.reason, payload.channel, payload.ts);
+    
+    // メッセージを最終状態に更新
+    try {
+      let updatedBlocks = JSON.parse(JSON.stringify(payload.blocks || []));
+      updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
+      updatedBlocks.push({
+        type: "context",
+        elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${payload.userId}>：${escapeMrkdwn(payload.reason)}） → NGフォルダへ移動しました` }]
+      });
+      
+      UrlFetchApp.fetch("https://slack.com/api/chat.update", {
+        method: "post",
+        headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+        contentType: "application/json",
+        payload: JSON.stringify({
+          channel: payload.channel,
+          ts: payload.ts,
+          text: "審査ボタン",
+          blocks: updatedBlocks
+        }),
+        muteHttpExceptions: true,
+      });
+      
+      paperLog("[handleAsyncNGProcessing] メッセージ更新成功", "fileId=" + payload.fileId);
+    } catch (updateErr) {
+      paperLog("[ERROR] [handleAsyncNGProcessing] メッセージ更新エラー", "error=" + String(updateErr));
+    }
+    
+    paperLog("[handleAsyncNGProcessing] NG処理完了", "fileId=" + payload.fileId);
+    return buildJsonResponse({ ok: true, message: "NG処理完了" });
+  } catch (err) {
+    paperLog("[ERROR] [handleAsyncNGProcessing] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    
+    // エラーメッセージをスレッドに投稿
+    try {
+      UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+        method: "post",
+        headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+        contentType: "application/json",
+        payload: JSON.stringify({
+          channel: payload.channel,
+          thread_ts: payload.ts,
+          text: `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`
+        }),
+        muteHttpExceptions: true,
+      });
+    } catch (postErr) {
+      paperLog("[ERROR] [handleAsyncNGProcessing] エラーメッセージ投稿失敗", "error=" + String(postErr));
+    }
+    
+    return buildErrorResponse(String(err));
+  }
+}
+
+// =========================
 // Slack Interactivity 処理
 // =========================
 
@@ -916,15 +997,11 @@ function handleSlackInteractivity(event) {
       const includeReasonInEmail = st.email_notify_block?.email_notify?.selected_options?.length > 0;
       paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason, "includeReasonInEmail=" + includeReasonInEmail);
 
-      // ★ 最優先: モーダルを先に閉じる（3秒タイムアウト対策）
-      // レスポンスを先に準備
-      const response = ContentService.createTextOutput("")
-        .setMimeType(ContentService.MimeType.TEXT);
-
-      // 重い処理は後で実行するため、非同期処理として実行
-      // Apps Scriptでは非同期処理が難しいため、処理を最適化して先にレスポンスを返す
+      // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
+      // 重い処理を実行する前に、非同期リクエストを送信してすぐにレスポンスを返す
+      
+      // まず「処理中...」メッセージを表示
       try {
-        // 1. まずメッセージを更新（軽い処理）
         let updatedBlocks = JSON.parse(JSON.stringify(meta.blocks || []));
         updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
         updatedBlocks.push({
@@ -932,58 +1009,59 @@ function handleSlackInteractivity(event) {
           elements: [{ type: "mrkdwn", text: `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → 処理中...` }]
         });
 
-        // メッセージ更新を非同期で実行（レスポンスを返した後も実行される）
-        try {
-          UrlFetchApp.fetch("https://slack.com/api/chat.update", {
-            method: "post",
-            headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-            contentType: "application/json",
-            payload: JSON.stringify({
-              channel: meta.channel,
-              ts: meta.ts,
-              text: "審査ボタン",
-              blocks: updatedBlocks
-            }),
-            muteHttpExceptions: true,
-          });
-        } catch (updateErr) {
-          paperLog("[ERROR] [handleSlackInteractivity] NG: メッセージ更新エラー（非同期）", "error=" + String(updateErr));
-        }
+        UrlFetchApp.fetch("https://slack.com/api/chat.update", {
+          method: "post",
+          headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+          contentType: "application/json",
+          payload: JSON.stringify({
+            channel: meta.channel,
+            ts: meta.ts,
+            text: "審査ボタン",
+            blocks: updatedBlocks
+          }),
+          muteHttpExceptions: true,
+        });
+      } catch (updateErr) {
+        paperLog("[ERROR] [handleSlackInteractivity] NG: 初回メッセージ更新エラー", "error=" + String(updateErr));
+      }
 
-        // 2. 重い処理を実行（ファイル移動、メール送信、ログ記録）
-        // これらの処理は時間がかかる可能性があるため、エラーが発生しても続行
+      // 重い処理を非同期で実行するため、自分自身のエンドポイントにリクエストを送信
+      try {
+        const asyncPayload = {
+          action: "processNG",
+          fileId: meta.fileId,
+          fileName: meta.name,
+          reason: reason,
+          includeReasonInEmail: includeReasonInEmail,
+          userId: userId,
+          channel: meta.channel,
+          ts: meta.ts,
+          blocks: meta.blocks
+        };
+        
+        const scriptUrl = ScriptApp.getService().getUrl();
+        
+        // 非同期リクエストを送信（レスポンスを待たない）
+        UrlFetchApp.fetch(scriptUrl, {
+          method: "post",
+          contentType: "application/json",
+          payload: JSON.stringify(asyncPayload),
+          muteHttpExceptions: true,
+          // タイムアウトを短く設定して、すぐにレスポンスを返せるようにする
+          // ただし、Apps Scriptではこのリクエストは完了まで実行される
+        });
+        
+        paperLog("[handleSlackInteractivity] 非同期処理リクエストを送信", "fileId=" + meta.fileId);
+      } catch (asyncErr) {
+        paperLog("[ERROR] [handleSlackInteractivity] 非同期処理リクエスト送信エラー", "error=" + String(asyncErr));
+        
+        // エラーの場合は直接処理を実行
         try {
           moveFile(meta.fileId, STATUS.rejected, reason, includeReasonInEmail);
-        } catch (moveErr) {
-          paperLog("[ERROR] [handleSlackInteractivity] NG: ファイル移動エラー", "error=" + String(moveErr));
-          // エラーをスレッドに投稿
-          try {
-            UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
-              method: "post",
-              headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-              contentType: "application/json",
-              payload: JSON.stringify({
-                channel: meta.channel,
-                thread_ts: meta.ts,
-                text: `⚠️ ファイル移動エラー: ${escapeMrkdwn(String(moveErr))}`
-              }),
-              muteHttpExceptions: true,
-            });
-          } catch (postErr) {
-            paperLog("[ERROR] [handleSlackInteractivity] エラーメッセージ投稿失敗", "error=" + String(postErr));
-          }
-        }
-
-        // 3. 監査ログを記録（エラーが発生しても続行）
-        try {
           logAudit("NG", meta.fileId, meta.name, userId, reason, meta.channel, meta.ts);
-        } catch (logErr) {
-          paperLog("[ERROR] [handleSlackInteractivity] NG: 監査ログ記録エラー", "error=" + String(logErr));
-        }
-
-        // 4. メッセージを最終状態に更新
-        try {
-          updatedBlocks = JSON.parse(JSON.stringify(meta.blocks || []));
+          
+          // メッセージを最終状態に更新
+          let updatedBlocks = JSON.parse(JSON.stringify(meta.blocks || []));
           updatedBlocks = updatedBlocks.filter((b) => b.type !== "actions");
           updatedBlocks.push({
             type: "context",
@@ -1002,35 +1080,15 @@ function handleSlackInteractivity(event) {
             }),
             muteHttpExceptions: true,
           });
-        } catch (finalUpdateErr) {
-          paperLog("[ERROR] [handleSlackInteractivity] NG: 最終メッセージ更新エラー", "error=" + String(finalUpdateErr));
-        }
-
-        paperLog("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
-      } catch (err) {
-        paperLog("[ERROR] [handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
-        
-        // エラーメッセージをスレッドに投稿
-        try {
-          UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
-            method: "post",
-            headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-            contentType: "application/json",
-            payload: JSON.stringify({
-              channel: meta.channel,
-              thread_ts: meta.ts,
-              text: `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`
-            }),
-            muteHttpExceptions: true,
-          });
-        } catch (postErr) {
-          paperLog("[ERROR] [handleSlackInteractivity] エラーメッセージ投稿失敗", "error=" + String(postErr));
+        } catch (fallbackErr) {
+          paperLog("[ERROR] [handleSlackInteractivity] フォールバック処理エラー", "error=" + String(fallbackErr));
         }
       }
 
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
       paperLog("[handleSlackInteractivity] view_submission処理完了、モーダルを閉じます");
-      return response;
+      return ContentService.createTextOutput("")
+        .setMimeType(ContentService.MimeType.TEXT);
     }
 
     return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
