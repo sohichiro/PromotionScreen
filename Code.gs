@@ -58,9 +58,31 @@ function doPost(event) {
     const file = folder.createFile(blob);
     file.setDescription(payload.comment || "");
     file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
-    file.setProperty(META_KEYS.comment, payload.comment || "");
-    file.setProperty(META_KEYS.uploadedAt, payload.timestamp || new Date().toISOString());
-    file.setProperty(META_KEYS.status, STATUS.pending);
+    
+    // カスタムプロパティの設定（エラーが発生しても処理を続行）
+    try {
+      file.setProperty(META_KEYS.comment, payload.comment || "");
+      paperLog("[doPost] プロパティ設定成功", "key=" + META_KEYS.comment);
+    } catch (err) {
+      console.warn("[doPost] プロパティ設定エラー (comment):", err);
+      paperLog("[doPost] プロパティ設定エラー (comment)", "error=" + String(err));
+    }
+    
+    try {
+      file.setProperty(META_KEYS.uploadedAt, payload.timestamp || new Date().toISOString());
+      paperLog("[doPost] プロパティ設定成功", "key=" + META_KEYS.uploadedAt);
+    } catch (err) {
+      console.warn("[doPost] プロパティ設定エラー (uploadedAt):", err);
+      paperLog("[doPost] プロパティ設定エラー (uploadedAt)", "error=" + String(err));
+    }
+    
+    try {
+      file.setProperty(META_KEYS.status, STATUS.pending);
+      paperLog("[doPost] プロパティ設定成功", "key=" + META_KEYS.status);
+    } catch (err) {
+      console.warn("[doPost] プロパティ設定エラー (status):", err);
+      paperLog("[doPost] プロパティ設定エラー (status)", "error=" + String(err));
+    }
 
     paperLog("[doPost] ファイル作成完了", "fileId=" + file.getId(), "fileName=" + file.getName());
     paperLog("[doPost] Slack通知を開始");
@@ -285,7 +307,14 @@ function moveFile(fileId, status) {
   }
 
   targetFolder.addFile(file);
-  file.setProperty(META_KEYS.status, status);
+  
+  // カスタムプロパティの設定（エラーが発生しても処理を続行）
+  try {
+    file.setProperty(META_KEYS.status, status);
+    console.log("[moveFile] プロパティ設定成功", "key=" + META_KEYS.status, "value=" + status);
+  } catch (err) {
+    console.warn("[moveFile] プロパティ設定エラー (status):", err);
+  }
 }
 
 function buildJsonResponse(payload, status = 200) {
