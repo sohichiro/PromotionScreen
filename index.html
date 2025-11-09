@@ -285,6 +285,8 @@
 
         <span class="badge button" id="badge-reload" style="display: none;">再読み込み</span>
 
+        <span class="badge button" id="badge-next" style="display: none;">次へ</span>
+
       </div>
     </div>
     <div id="layerA" class="layer"></div>
@@ -318,11 +320,13 @@
     // === UI 表示/非表示トグル ===
     let statusVisible = false; // 初期状態: 非表示
     const badgeReload = document.getElementById('badge-reload');
+    const badgeNext = document.getElementById('badge-next');
     function setStatusVisible(v) {
       statusVisible = v;
       document.body.classList.toggle('status-visible', v);
-      // ステータス表示時に再読み込みボタンを表示
+      // ステータス表示時に再読み込みボタンと次へボタンを表示
       badgeReload.style.display = v ? 'block' : 'none';
+      badgeNext.style.display = v ? 'block' : 'none';
     }
     // 起動時に反映
     setStatusVisible(statusVisible);
@@ -647,6 +651,17 @@
       await fetchList();
       badgeReload.textContent = '再読み込み';
       badgeReload.style.pointerEvents = 'auto';
+    });
+
+    // 次へボタンのクリックイベント
+    badgeNext.addEventListener('click', async () => {
+      badgeNext.textContent = '読み込み中...';
+      badgeNext.style.pointerEvents = 'none';
+      await showNext();
+      badgeNext.textContent = '次へ';
+      badgeNext.style.pointerEvents = 'auto';
+      // 次のスケジュールをリセット
+      scheduleNext(SLIDE_MS);
     });
 
     // 次の画像を読み込むボタンのクリックイベント
