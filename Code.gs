@@ -22,24 +22,33 @@ const STATUS = {
 
 function doPost(event) {
   try {
+    paperLog("[doPost] リクエスト受信", "contentType=" + (event?.postData?.type || "なし"), "hasPostData=" + !!event?.postData);
+    
     // Slack Interactivity リクエストかどうかを判定
     const contentType = event?.postData?.type || "";
     const isSlackRequest = contentType === "application/x-www-form-urlencoded" && event?.parameter?.payload;
     
     if (isSlackRequest) {
+      paperLog("[doPost] Slack Interactivity リクエストとして処理");
       return handleSlackInteractivity(event);
     }
 
     // 画像アップロード処理
+    paperLog("[doPost] 画像アップロード処理を開始");
     if (!event?.postData?.contents) {
+      paperLog("[doPost] エラー: リクエストデータが空");
       return buildErrorResponse("リクエストデータが空です。", 400);
     }
 
     const payload = JSON.parse(event.postData.contents);
+    paperLog("[doPost] ペイロード解析完了", "filename=" + (payload.filename || "なし"), "hasPhotoBase64=" + !!payload.photoBase64);
+    
     validatePayload(payload);
 
     const folder = DriveApp.getFolderById(CONFIG.inboxFolderId);
     const filename = buildFileName(payload);
+    paperLog("[doPost] ファイル作成開始", "filename=" + filename, "folderId=" + CONFIG.inboxFolderId);
+    
     const blob = createBlob(payload, filename);
     const file = folder.createFile(blob);
     file.setDescription(payload.comment || "");
@@ -48,10 +57,15 @@ function doPost(event) {
     file.setProperty(META_KEYS.uploadedAt, payload.timestamp || new Date().toISOString());
     file.setProperty(META_KEYS.status, STATUS.pending);
 
+    paperLog("[doPost] ファイル作成完了", "fileId=" + file.getId(), "fileName=" + file.getName());
+    paperLog("[doPost] Slack通知を開始");
+
     notifySlack(file, payload);
 
+    paperLog("[doPost] 処理完了", "fileId=" + file.getId());
     return buildJsonResponse({ ok: true, fileId: file.getId(), id: file.getId() });
   } catch (err) {
+    paperLog("[doPost] エラー発生", "error=" + String(err), "stack=" + (err.stack || "なし"));
     console.error(err);
     return buildErrorResponse(err.message || "不明なエラーが発生しました。");
   }
@@ -92,14 +106,19 @@ function buildFileName(payload) {
 }
 
 function notifySlack(file, payload) {
+  paperLog("[notifySlack] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
+  
   // Bot Token が設定されている場合は Block Kit 形式で投稿
   if (CONFIG.slackBotToken && CONFIG.slackChannelId) {
+    paperLog("[notifySlack] Block Kit 形式で投稿を試みます", "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"), "channelId=" + CONFIG.slackChannelId);
     postPhotoToSlackWithBlockKit(file, payload);
     return;
   }
 
   // フォールバック: Webhook URL を使用
+  paperLog("[notifySlack] Webhook URL 形式で投稿を試みます", "webhookUrl=" + (CONFIG.slackWebhookUrl || "未設定"));
   if (!CONFIG.slackWebhookUrl || CONFIG.slackWebhookUrl.includes("hooks.slack.com/services/XXXX")) {
+    paperLog("[notifySlack] Webhook URL が未設定またはプレースホルダーのため、投稿をスキップします");
     return;
   }
 
@@ -128,9 +147,13 @@ function notifySlack(file, payload) {
 }
 
 function postPhotoToSlackWithBlockKit(file, payload) {
+  paperLog("[postPhotoToSlackWithBlockKit] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
+  
   const fileUrl = `https://drive.google.com/file/d/${file.getId()}/view`;
   const previewUrl = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w800`;
   const comment = payload.comment || "（なし）";
+  
+  paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "previewUrl=" + previewUrl);
   
   const blocks = [
     {
@@ -175,6 +198,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
     },
   ];
 
+  paperLog("[postPhotoToSlackWithBlockKit] Slack API リクエスト送信");
   const resp = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
     method: "post",
     headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
@@ -186,9 +210,16 @@ function postPhotoToSlackWithBlockKit(file, payload) {
     muteHttpExceptions: true,
   });
 
-  const data = JSON.parse(resp.getContentText() || "{}");
+  const responseCode = resp.getResponseCode();
+  const responseText = resp.getContentText();
+  paperLog("[postPhotoToSlackWithBlockKit] レスポンス受信", "statusCode=" + responseCode, "response=" + responseText);
+
+  const data = JSON.parse(responseText || "{}");
   if (!data.ok) {
-    console.error("Slack投稿エラー:", resp.getContentText());
+    paperLog("[postPhotoToSlackWithBlockKit] エラー", "error=" + responseText);
+    console.error("Slack投稿エラー:", responseText);
+  } else {
+    paperLog("[postPhotoToSlackWithBlockKit] 成功", "ts=" + (data.ts || "なし"), "channel=" + (data.channel || "なし"));
   }
 }
 
@@ -495,5 +526,36 @@ function escapeMrkdwn(s) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+// =========================
+// ログ機能
+// =========================
+
+function paperLog() {
+  try {
+    const sheetId = PropertiesService.getScriptProperties().getProperty("DEBUG_SHEET_ID");
+    if (!sheetId) {
+      // DEBUG_SHEET_ID が未設定ならログは無視（動作継続）
+      return;
+    }
+    const ss = SpreadsheetApp.openById(sheetId);
+    const sh = ss.getSheets()[0];
+
+    // 見出しが無ければ作成
+    if (sh.getLastRow() === 0) {
+      sh.appendRow(["timestamp", "message"]);
+    }
+
+    // 引数を全部連結
+    const msg = Array.from(arguments)
+      .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
+      .join(" ");
+
+    sh.appendRow([new Date(), msg]);
+  } catch (err) {
+    // ログ書き込みに失敗しても無視
+    console.warn("paperLog failed:", err);
+  }
 }
 
