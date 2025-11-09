@@ -775,9 +775,10 @@ function handleSlackInteractivity(event) {
         });
       }
 
-      // モーダルを閉じる
-      return ContentService.createTextOutput(JSON.stringify({ response_action: "clear" }))
-        .setMimeType(ContentService.MimeType.JSON);
+      // モーダルを閉じる（空のレスポンスを返す）
+      paperLog("[handleSlackInteractivity] view_submission処理完了、モーダルを閉じます");
+      return ContentService.createTextOutput("")
+        .setMimeType(ContentService.MimeType.TEXT);
     }
 
     return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
