@@ -1,0 +1,678 @@
+<!DOCTYPE html>
+
+<html lang="ja">
+
+
+
+<head>
+
+  <meta charset="utf-8" />
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <meta name="theme-color" content="#000000">
+
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+
+
+
+  <title>Drive Slideshow</title>
+
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: #FFFFFF;
+      color: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", "Noto Sans JP", Arial, sans-serif;
+    }
+
+    #stage {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      background: #FFFFFF;
+      display: grid;
+      place-items: center;
+      cursor: none;
+    }
+
+    .layer {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      opacity: 0;
+      transition: opacity 1000ms ease;
+      background: #FFFFFF;
+    }
+
+    .layer.show {
+      opacity: 1;
+    }
+
+    img {
+      max-width: 100vw;
+      max-height: 100vh;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      image-rendering: auto;
+      background: #FFFFFF;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    #hud {
+      position: absolute;
+      right: 12px;
+      bottom: 10px;
+      left: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      opacity: 0;
+      transition: opacity .3s ease;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .8);
+      pointer-events: none;
+    }
+
+    .pill {
+      background: rgba(0, 0, 0, .45);
+      padding: 6px 10px;
+      border-radius: 999px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, .6);
+      display: inline-block;
+      margin-left: 6px;
+    }
+
+    .dot.on {
+      background: #fff;
+    }
+
+    #hint {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .6);
+      background: rgba(0, 0, 0, .35);
+      padding: 6px 10px;
+      border-radius: 8px;
+      opacity: 0;
+      transition: opacity .3s ease;
+    }
+
+    #statusbar {
+      position: absolute;
+      left: 12px;
+      bottom: calc(env(safe-area-inset-bottom) + 12px);
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-start;
+      max-width: min(80vw, 900px);
+      padding: 6px 10px;
+      background: rgba(0, 0, 0, .35);
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, .15);
+      border-radius: 10px;
+      font-size: 12px;
+      color: #fff;
+      z-index: 15;
+      pointer-events: none;
+      /* バッジは触れなくてOK */
+      opacity: 0;
+      transition: opacity .3s ease;
+    }
+
+    #clock {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      opacity: .95
+    }
+
+    #badges {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .badge {
+      background: rgba(255, 255, 255, .12);
+      border: 1px solid rgba(255, 255, 255, .18);
+      padding: 4px 8px;
+      border-radius: 999px;
+      pointer-events: auto;
+    }
+
+    .badge.ok {
+      background: rgba(46, 204, 113, .2);
+      border-color: rgba(46, 204, 113, .35);
+    }
+
+    .badge.warn {
+      background: rgba(241, 196, 15, .2);
+      border-color: rgba(241, 196, 15, .35);
+    }
+
+    .badge.err {
+      background: rgba(231, 76, 60, .2);
+      border-color: rgba(231, 76, 60, .35);
+    }
+
+    .badge.button {
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+
+    .badge.button:hover {
+      opacity: 0.8;
+    }
+
+    .badge.button:active {
+      opacity: 0.6;
+    }
+
+    #clock-fixed {
+      position: absolute;
+      right: calc(env(safe-area-inset-right) + 16px);
+      bottom: calc(env(safe-area-inset-bottom) + 16px);
+      font-size: 26px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 0 4px rgba(0, 0, 0, 0.7);
+      pointer-events: none;
+      /* 触れられなくてOK */
+      z-index: 20;
+    }
+
+    #hud {
+      position: absolute;
+      top: calc(env(safe-area-inset-top) + 12px);
+      right: calc(env(safe-area-inset-right) + 12px);
+      left: auto;
+      bottom: auto;
+      /* ← 下・左の固定は解除 */
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      opacity: 0;
+      transition: opacity .3s ease;
+      font-size: 12px;
+      color: rgba(255, 255, 255, .8);
+      pointer-events: none;
+      z-index: 14;
+    }
+
+    body.status-visible #statusbar,
+    body.status-visible #hint {
+      opacity: 1;
+    }
+
+    body.status-visible #hud {
+      opacity: .95;
+    }
+
+    .next-image-btn {
+      position: absolute;
+      right: calc(env(safe-area-inset-right) + 16px);
+      top: 50%;
+      transform: translateY(-50%);
+      background: rgba(0, 0, 0, .7);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, .3);
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      pointer-events: auto;
+      z-index: 16;
+      transition: opacity 0.3s ease, background 0.2s ease;
+      backdrop-filter: blur(4px);
+    }
+
+    .next-image-btn:hover {
+      background: rgba(0, 0, 0, .85);
+    }
+
+    .next-image-btn:active {
+      background: rgba(0, 0, 0, .95);
+    }
+
+    body.status-visible .next-image-btn {
+      display: block;
+    }
+  </style>
+
+</head>
+
+
+
+<body>
+
+  <div id="stage">
+
+    <div id="statusbar">
+
+
+
+      <div id="badges">
+
+        <span class="badge" id="badge-state">Loading</span>
+
+        <span class="badge" id="badge-net">Offline</span>
+
+        <span class="badge" id="badge-count">0 photos</span>
+
+        <span class="badge" id="badge-updated">—</span>
+
+        <span class="badge button" id="badge-reload" style="display: none;">再読み込み</span>
+
+        <span class="badge button" id="badge-next" style="display: none;">次へ</span>
+
+      </div>
+    </div>
+    <div id="layerA" class="layer"></div>
+    <div id="layerB" class="layer"></div>
+    <div id="clock-fixed">--:--:--</div>
+    <div id="hint">トリプルタップでステータス表示 / 表示中はダブルタップで全画面 / 2本指で一時停止</div>
+    <div id="hud">
+    </div>
+    <button id="btn-next-image" class="next-image-btn" style="display: none;">次の画像を読み込む</button>
+
+  </div>
+
+
+
+  <script src="assets/js/config.js"></script>
+  <script>
+
+    const layerA = document.getElementById('layerA');
+    const layerB = document.getElementById('layerB');
+    let currentLayer = layerA;
+    let nextLayer = layerB;
+    let items = []; // {url, updatedAt, ...}
+    let timer = null;
+    let running = true;
+
+    // ★ 追加: ループ管理
+    let loopHandle = null;
+    let inFlight = false;   // 遷移の同時実行防止
+    let lastSwapAt = 0;     // 最後に画像が画面に出た時刻（ms）
+    let currentIndex = 0;   // 現在表示中のインデックス（アップロード順）
+
+    // === UI 表示/非表示トグル ===
+    let statusVisible = false; // 初期状態: 非表示
+    const badgeReload = document.getElementById('badge-reload');
+    const badgeNext = document.getElementById('badge-next');
+    function setStatusVisible(v) {
+      statusVisible = v;
+      document.body.classList.toggle('status-visible', v);
+      // ステータス表示時に再読み込みボタンと次へボタンを表示
+      badgeReload.style.display = v ? 'block' : 'none';
+      badgeNext.style.display = v ? 'block' : 'none';
+    }
+    // 起動時に反映
+    setStatusVisible(statusVisible);
+
+    // トリプル/ダブルタップを判定
+    const stage = document.getElementById('stage');
+    const TAP_TIMEOUT_MS = 400;
+    let tapCount = 0;
+    let tapTimerId = null;
+
+    function resetTapSequence() {
+      tapCount = 0;
+      if (tapTimerId) {
+        clearTimeout(tapTimerId);
+        tapTimerId = null;
+      }
+    }
+
+    function handleTapGesture() {
+      tapCount += 1;
+
+      if (tapCount === 3) {
+        setStatusVisible(!statusVisible);
+        resetTapSequence();
+        return;
+      }
+
+      if (tapTimerId) clearTimeout(tapTimerId);
+      tapTimerId = setTimeout(() => {
+        if (tapCount === 2 && statusVisible) {
+          toggleFullscreen();
+        }
+        resetTapSequence();
+      }, TAP_TIMEOUT_MS);
+    }
+
+    let multiTouchGesture = false;
+
+    stage.addEventListener('pointerup', (ev) => {
+      if (!ev.isPrimary) return;
+      if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+      if (ev.pointerType === 'touch') {
+        if (multiTouchGesture) return;
+        ev.preventDefault();
+      }
+      handleTapGesture();
+    });
+
+    // --- Topbar elements
+    const badgeState = document.getElementById('badge-state');
+    const badgeNet = document.getElementById('badge-net');
+    const badgeCount = document.getElementById('badge-count');
+    const badgeUpdated = document.getElementById('badge-updated');
+    const clockEl = document.getElementById('clock-fixed');
+
+    // 状態セット
+    function setAppState(kind, extraText) {
+      // kind: 'loading' | 'playing' | 'paused' | 'updating' | 'error'
+      const map = {
+        loading: { text: 'Loading', cls: 'warn' },
+        playing: { text: 'Playing', cls: 'ok' },
+        paused: { text: 'Paused', cls: 'warn' },
+        updating: { text: 'Updating', cls: 'warn' },
+        error: { text: 'Error', cls: 'err' },
+      };
+      const m = map[kind] || { text: String(kind), cls: '' };
+      badgeState.classList.remove('ok', 'warn', 'err');
+      if (m.cls) badgeState.classList.add(m.cls);
+      badgeState.textContent = extraText ? `${m.text}: ${extraText}` : m.text;
+    }
+
+    // ネットワーク表示
+    function refreshNetBadge() {
+      const online = navigator.onLine;
+      badgeNet.classList.remove('ok', 'warn', 'err');
+      badgeNet.classList.add(online ? 'ok' : 'err');
+      badgeNet.textContent = online ? 'Online' : 'Offline';
+    }
+    window.addEventListener('online', refreshNetBadge);
+    window.addEventListener('offline', refreshNetBadge);
+    refreshNetBadge();
+
+    // 時計
+    function tickClock() {
+      const d = new Date();
+      clockEl.textContent = d.toLocaleTimeString('ja-JP', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    }
+    tickClock();
+    setInterval(tickClock, 1000);
+
+    // JSONの日時を人間向けに
+    function fmtTime(s) {
+      try { return new Date(s).toLocaleString('ja-JP'); } catch { return s; }
+    }
+
+    async function fetchList() {
+      setAppState('updating');
+
+      // 15秒タイムアウト
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 15000);
+
+      try {
+        const res = await fetch(`${API_BASE}?fn=list`, {
+          cache: 'no-store',
+          signal: ctrl.signal
+        });
+
+        // ステータス非200でも本文をログ
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          console.error('list non-OK', res.status, text);
+          return;
+        }
+
+        let json;
+        try {
+          json = await res.json();
+        } catch (e) {
+          const text = await res.text().catch(() => '');
+          console.error('JSON parse error. body=', text);
+          return;
+        }
+
+        // 旧URLなら img64 に差し替え（既に入れてる場合はそのままでOK）
+        items = (json.items || []).map(it => {
+          const u = new URL(it.url, location.href);
+          if (u.searchParams.get('fn') === 'image') u.searchParams.set('fn', 'img64');
+          return { ...it, url: u.toString() };
+        });
+
+        // リストが更新されたらインデックスをリセット（新しい順で並んでいるので最初から表示）
+        currentIndex = 0;
+
+        badgeCount.textContent = `${items.length} photos`;
+        badgeUpdated.textContent = `Updated ${fmtTime(json.now)}`;
+
+        if (!items.length) {
+          setAppState('warn', 'No images');
+          return;
+        }
+        // 実行中かどうかで状態
+        setAppState(running ? 'playing' : 'paused');
+      } catch (e) {
+        console.error('fetch list error', e);
+      } finally {
+        clearTimeout(to);
+      }
+    }
+
+    // アップロード順に順番に選択（シンプルな順次表示）
+    function pickNext() {
+      if (!items.length) return null;
+      const item = items[currentIndex];
+      // 次のインデックスに進む（最後まで行ったら最初に戻る）
+      currentIndex = (currentIndex + 1) % items.length;
+      return item;
+    }
+
+    async function preload(url) {
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 15000);
+      try {
+        const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status} ${text?.slice(0, 200)}`);
+        }
+        let payload;
+        try {
+          payload = await res.json();
+        } catch (e) {
+          const text = await res.text().catch(() => '');
+          throw new Error(`JSON解析失敗 ${text?.slice(0, 200)}`);
+        }
+        if (payload?.error) {
+          // エラー本文をそのまま可視化
+          throw new Error(`img64 error: ${payload.error}`);
+        }
+        const mime = payload?.mime || 'image/jpeg';
+        const b64 = payload?.data;
+        if (!b64) throw new Error('data欠落');
+
+        const src = `data:${mime};base64,${b64}`;
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = src;
+        await new Promise((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('img onerror'));
+          setTimeout(() => resolve(), 0);
+        });
+        return img;
+      } finally {
+        clearTimeout(to);
+      }
+    }
+
+    async function showNext() {
+      if (inFlight) return;       // ★ 二重起動ガード
+      inFlight = true;
+      try {
+        const it = pickNext();
+        if (!it) { return; }
+
+        // どのURLで落ちてるか一緒に表示
+        //status(`読み込み: ${it.name || ''}\n${it.url}`);
+        setAppState('loading', it.name || '');
+
+        const img = await preload(it.url);
+
+        nextLayer.innerHTML = '';
+        nextLayer.appendChild(img);
+        nextLayer.classList.add('show');
+        currentLayer.classList.remove('show');
+        [currentLayer, nextLayer] = [nextLayer, currentLayer];
+        // この瞬間から表示時間カウント開始
+        lastSwapAt = Date.now();
+        setAppState(running ? 'playing' : 'paused');
+      } catch (e) {
+        console.error('showNext error', e);
+        setAppState('error', 'Render');
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    // ★ 追加: 次の遷移を予約（setIntervalをやめる）
+    function scheduleNext(afterMs) {
+      if (loopHandle) clearTimeout(loopHandle);
+      loopHandle = setTimeout(async () => {
+        if (!running) {
+          // 一時停止中は短い間隔で再チェック
+          scheduleNext(500);
+          return;
+        }
+
+        // まだ最低表示時間に満たない場合は延長
+        const elapsed = Date.now() - lastSwapAt;
+        if (elapsed < SLIDE_MS) {
+          scheduleNext(SLIDE_MS - elapsed);
+          return;
+        }
+
+        await showNext();
+        // 次回も「画面に出してから」SLIDE_MS後
+        scheduleNext(SLIDE_MS);
+      }, Math.max(0, afterMs));
+    }
+
+    function startLoop() {
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => { if (running) showNext(); }, SLIDE_MS);
+    }
+
+    // 全画面切替（iPhone Safari）
+    async function toggleFullscreen() {
+      const el = document.documentElement;
+      try {
+        if (!document.fullscreenElement) {
+          if (el.requestFullscreen) await el.requestFullscreen();
+        } else {
+          await document.exitFullscreen();
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // 初期化
+    (async () => {
+      await fetchList();
+      if (!items.length) return;
+
+      // 最初の1枚をすぐ表示
+      await showNext();
+      currentLayer.classList.add('show');
+      //startLoop();
+      scheduleNext(SLIDE_MS);
+
+      // 5分おきに最新リストを再取得（新規ファイル追加を拾う）
+      setInterval(fetchList, 5 * 60 * 1000);
+    })();
+
+    // タップでフルスクリーン
+    document.getElementById('stage').addEventListener('click', () => toggleFullscreen());
+    // 2本指タップで一時停止/再開（ガイド中の簡易操作）
+    window.addEventListener('touchstart', (ev) => {
+      if (ev.touches.length === 2) {
+        running = !running;
+        setAppState(running ? 'playing' : 'paused');
+        if (running) scheduleNext(SLIDE_MS);
+      }
+      if (ev.touches.length > 1) {
+        multiTouchGesture = true;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchend', (ev) => {
+      if (ev.touches.length === 0) {
+        multiTouchGesture = false;
+      }
+    }, { passive: true });
+
+    window.addEventListener('touchcancel', () => {
+      multiTouchGesture = false;
+    }, { passive: true });
+
+    // 再読み込みボタンのクリックイベント
+    badgeReload.addEventListener('click', async () => {
+      badgeReload.textContent = '読み込み中...';
+      badgeReload.style.pointerEvents = 'none';
+      await fetchList();
+      badgeReload.textContent = '再読み込み';
+      badgeReload.style.pointerEvents = 'auto';
+    });
+
+    // 次へボタンのクリックイベント
+    badgeNext.addEventListener('click', async () => {
+      badgeNext.textContent = '読み込み中...';
+      badgeNext.style.pointerEvents = 'none';
+      await showNext();
+      badgeNext.textContent = '次へ';
+      badgeNext.style.pointerEvents = 'auto';
+      // 次のスケジュールをリセット
+      scheduleNext(SLIDE_MS);
+    });
+
+    // 次の画像を読み込むボタンのクリックイベント
+    const btnNextImage = document.getElementById('btn-next-image');
+    btnNextImage.addEventListener('click', async () => {
+      btnNextImage.textContent = '読み込み中...';
+      btnNextImage.style.pointerEvents = 'none';
+      await showNext();
+      btnNextImage.textContent = '次の画像を読み込む';
+      btnNextImage.style.pointerEvents = 'auto';
+      // 次のスケジュールをリセット
+      scheduleNext(SLIDE_MS);
+    });
+  </script>
+
+</body>
+
+
+
+</html>
