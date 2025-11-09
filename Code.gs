@@ -9,6 +9,9 @@ const CONFIG = {
   signageFolderId: "12CurPdxu1BlWC0k_9FTdOuYcTgCNO3_R", // ok等、表示対象フォルダのIDに変更可
   signageExpiresMs: 24 * 60 * 60 * 1000,
   signageAllowOrigin: '*',
+  // その他の設定
+  sharedSecret: PropertiesService.getScriptProperties().getProperty("SHARED_SECRET") || "TEMP_SECRET",
+  debugSheetId: PropertiesService.getScriptProperties().getProperty("DEBUG_SHEET_ID") || "",
 };
 
 const META_KEYS = {
@@ -401,10 +404,9 @@ function applyCorsHeaders(output) {
 // サイネージ API（list/img64/image）
 // =========================
 
-// 署名シークレット（Script Properties 推奨）
+// 署名シークレット（CONFIGから取得）
 function getSecret_() {
-  const p = PropertiesService.getScriptProperties().getProperty('SHARED_SECRET');
-  return p || 'TEMP_SECRET';
+  return CONFIG.sharedSecret;
 }
 
 function signFor_(id, exp) {
@@ -858,7 +860,7 @@ function paperLog() {
 
   // スプレッドシートにも出力（設定されている場合）
   try {
-    const sheetId = PropertiesService.getScriptProperties().getProperty("DEBUG_SHEET_ID");
+    const sheetId = CONFIG.debugSheetId;
     if (!sheetId) {
       // DEBUG_SHEET_ID が未設定ならスプレッドシートへの書き込みはスキップ
       return;
