@@ -5,13 +5,10 @@ const CONFIG = {
   slackBotToken: PropertiesService.getScriptProperties().getProperty("SLACK_BOT_TOKEN") || "",
   slackSigningSecret: PropertiesService.getScriptProperties().getProperty("SLACK_SIGNING_SECRET") || "",
   slackChannelId: PropertiesService.getScriptProperties().getProperty("SLACK_CHANNEL_ID") || "",
-};
-
-// ===== サイネージ設定（表示用） =====
-const SIGNAGE_CONFIG = {
-  FOLDER_ID: '12CurPdxu1BlWC0k_9FTdOuYcTgCNO3_R', // ok等、表示対象フォルダのIDに変更可
-  EXPIRES_MS: 24 * 60 * 60 * 1000,
-  ALLOW_ORIGIN: '*',
+  // サイネージ設定（表示用）
+  signageFolderId: "12CurPdxu1BlWC0k_9FTdOuYcTgCNO3_R", // ok等、表示対象フォルダのIDに変更可
+  signageExpiresMs: 24 * 60 * 60 * 1000,
+  signageAllowOrigin: '*',
 };
 
 const META_KEYS = {
@@ -417,7 +414,7 @@ function signFor_(id, exp) {
 }
 
 function handleList_() {
-  const folder = DriveApp.getFolderById(SIGNAGE_CONFIG.FOLDER_ID);
+  const folder = DriveApp.getFolderById(CONFIG.signageFolderId);
   const files = folder.getFiles();
 
   const items = [];
@@ -433,7 +430,7 @@ function handleList_() {
 
     const id = f.getId();
     const updated = f.getLastUpdated();
-    const exp = Date.now() + SIGNAGE_CONFIG.EXPIRES_MS;
+    const exp = Date.now() + CONFIG.signageExpiresMs;
     const sig = signFor_(id, exp);
     const base = ScriptApp.getService().getUrl();
     const url  = `${base}?fn=img64&id=${encodeURIComponent(id)}&exp=${exp}&sig=${encodeURIComponent(sig)}`;
@@ -488,7 +485,7 @@ function jsonResponse_(obj, status, extraHeaders) {
   const text = JSON.stringify(obj, null, 2);
   const out = ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
   return addHeaders_(out, Object.assign({
-    'Access-Control-Allow-Origin': SIGNAGE_CONFIG.ALLOW_ORIGIN,
+    'Access-Control-Allow-Origin': CONFIG.signageAllowOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Cache-Control': 'no-store',
@@ -498,7 +495,7 @@ function jsonResponse_(obj, status, extraHeaders) {
 function textResponse_(text, status) {
   const out = ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.TEXT);
   return addHeaders_(out, {
-    'Access-Control-Allow-Origin': SIGNAGE_CONFIG.ALLOW_ORIGIN,
+    'Access-Control-Allow-Origin': CONFIG.signageAllowOrigin,
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Cache-Control': 'no-store',
