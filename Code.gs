@@ -618,9 +618,18 @@ function handleSlackInteractivity(event) {
       }
 
       if (action.action_id === "ng_reason") {
+        console.log("[handleSlackInteractivity] NG処理開始");
+        paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + val.fileId, "hasTrigger=" + !!payload.trigger_id);
+        
         try {
+          // trigger_idの有効期限は3秒なので、すぐにモーダルを開く
+          paperLog("[handleSlackInteractivity] openNgModal呼び出し直前");
           openNgModal(payload.trigger_id, val, channel, ts, payload.message.blocks);
+          paperLog("[handleSlackInteractivity] openNgModal呼び出し完了");
         } catch (err) {
+          console.error("[handleSlackInteractivity] モーダル起動エラー", "error=" + String(err));
+          paperLog("[handleSlackInteractivity] モーダル起動エラー", "error=" + String(err));
+          
           // エラーメッセージをスレッドに投稿
           UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
             method: "post",
@@ -743,6 +752,13 @@ function verifySlackSignature(event) {
 }
 
 function openNgModal(triggerId, val, channel, ts, originalBlocks) {
+  console.log("[openNgModal] 開始", "triggerId=" + (triggerId ? "あり" : "なし"), "fileId=" + val.fileId);
+  paperLog("[openNgModal] 開始", "triggerId=" + (triggerId ? "あり" : "なし"), "fileId=" + val.fileId);
+  
+  if (!triggerId) {
+    throw new Error("trigger_idが取得できません");
+  }
+  
   const view = {
     type: "modal",
     callback_id: "ng_modal",
@@ -789,17 +805,29 @@ function openNgModal(triggerId, val, channel, ts, originalBlocks) {
     ],
   };
 
+  paperLog("[openNgModal] views.open呼び出し開始");
   const resp = UrlFetchApp.fetch("https://slack.com/api/views.open", {
     method: "post",
     headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-    payload: { trigger_id: triggerId, view: JSON.stringify(view) },
+    contentType: "application/json",
+    payload: JSON.stringify({
+      trigger_id: triggerId,
+      view: view
+    }),
     muteHttpExceptions: true,
   });
 
-  const data = JSON.parse(resp.getContentText() || "{}");
+  const respText = resp.getContentText();
+  const data = JSON.parse(respText || "{}");
+  
+  paperLog("[openNgModal] views.openレスポンス", "ok=" + data.ok, "error=" + (data.error || "なし"));
+  console.log("[openNgModal] レスポンス", "ok=" + data.ok, "response=" + respText.substring(0, 300));
+  
   if (!data.ok) {
-    throw new Error("views.open failed: " + resp.getContentText());
+    throw new Error("views.open failed: " + respText);
   }
+  
+  paperLog("[openNgModal] モーダル表示成功");
 }
 
 function replaceOriginalViaResponseUrl(responseUrl, baseBlocks, statusLine, removeActions) {
