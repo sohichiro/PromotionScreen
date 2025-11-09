@@ -31,10 +31,7 @@ const STATUS = {
 
 function doPost(event) {
   // 最初に必ずログを出力（doPost が呼ばれているか確認）
-  console.log("[doPost] 関数が呼ばれました", new Date().toISOString());
-  if (CONFIG.debugMode) {
-    paperLog("[doPost] 関数が呼ばれました");
-  }
+  paperLog("[doPost] 関数が呼ばれました", new Date().toISOString());
   
   try {
     if (CONFIG.debugMode) {
@@ -102,8 +99,7 @@ function doPost(event) {
     }
     return buildJsonResponse({ ok: true, fileId: file.getId(), id: file.getId() });
   } catch (err) {
-    paperLog("[doPost] エラー発生", "error=" + String(err), "stack=" + (err.stack || "なし"));
-    console.error(err);
+    paperLog("[ERROR] [doPost] エラー発生", "error=" + String(err), "stack=" + (err.stack || "なし"));
     return buildErrorResponse(err.message || "不明なエラーが発生しました。");
   }
 }
@@ -143,17 +139,11 @@ function buildFileName(payload) {
 }
 
 function notifySlack(file, payload) {
-  console.log("[notifySlack] 関数が呼ばれました", "fileId=" + file.getId(), "fileName=" + file.getName());
-  if (CONFIG.debugMode) {
-    paperLog("[notifySlack] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
-  }
+  paperLog("[notifySlack] 関数が呼ばれました", "fileId=" + file.getId(), "fileName=" + file.getName());
   
   // Bot Token が設定されている場合は Block Kit 形式で投稿
   if (CONFIG.slackBotToken && CONFIG.slackChannelId) {
-    console.log("[notifySlack] Block Kit 形式で投稿を試みます", "botToken設定=" + !!CONFIG.slackBotToken, "channelId=" + CONFIG.slackChannelId);
-    if (CONFIG.debugMode) {
-      paperLog("[notifySlack] Block Kit 形式で投稿を試みます", "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"), "channelId=" + CONFIG.slackChannelId);
-    }
+    paperLog("[notifySlack] Block Kit 形式で投稿を試みます", "botToken設定=" + !!CONFIG.slackBotToken, "channelId=" + CONFIG.slackChannelId);
     postPhotoToSlackWithBlockKit(file, payload);
     return;
   }
@@ -165,24 +155,15 @@ function notifySlack(file, payload) {
 }
 
 function postPhotoToSlackWithBlockKit(file, payload) {
-  console.log("[postPhotoToSlackWithBlockKit] 関数が呼ばれました", "fileId=" + file.getId(), "fileName=" + file.getName());
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] 関数が呼ばれました", "fileId=" + file.getId(), "fileName=" + file.getName());
   
   const fileUrl = `https://drive.google.com/file/d/${file.getId()}/view`;
   const comment = payload.comment || "（なし）";
   
-  console.log("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"));
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId);
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"));
   
   // ステップ1: アップロードURLを取得
-  console.log("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
   
   const blob = file.getBlob();
   const fileSize = blob.getBytes().length;
@@ -201,21 +182,14 @@ function postPhotoToSlackWithBlockKit(file, payload) {
 
   const urlData = JSON.parse(urlResp.getContentText() || "{}");
   if (!urlData.ok) {
-    console.error("[postPhotoToSlackWithBlockKit] URL取得エラー", "error=" + urlResp.getContentText());
-    paperLog("[postPhotoToSlackWithBlockKit] URL取得エラー", "error=" + urlResp.getContentText());
+    paperLog("[ERROR] [postPhotoToSlackWithBlockKit] URL取得エラー", "error=" + urlResp.getContentText());
     return;
   }
 
-  console.log("[postPhotoToSlackWithBlockKit] URL取得成功");
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] URL取得成功");
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] URL取得成功");
 
   // ステップ2: 画像をアップロード
-  console.log("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
   
   const uploadResp = UrlFetchApp.fetch(urlData.upload_url, {
     method: "post",
@@ -225,21 +199,14 @@ function postPhotoToSlackWithBlockKit(file, payload) {
 
   const uploadCode = uploadResp.getResponseCode();
   if (uploadCode < 200 || uploadCode >= 300) {
-    console.error("[postPhotoToSlackWithBlockKit] 画像アップロードエラー", "statusCode=" + uploadCode);
-    paperLog("[postPhotoToSlackWithBlockKit] 画像アップロードエラー", "statusCode=" + uploadCode);
+    paperLog("[ERROR] [postPhotoToSlackWithBlockKit] 画像アップロードエラー", "statusCode=" + uploadCode);
     return;
   }
 
-  console.log("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
 
   // ステップ3: アップロード完了を通知（チャンネルに投稿）
-  console.log("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
   
   const completeResp = UrlFetchApp.fetch("https://slack.com/api/files.completeUploadExternal", {
     method: "post",
@@ -260,21 +227,14 @@ function postPhotoToSlackWithBlockKit(file, payload) {
 
   const completeData = JSON.parse(completeResp.getContentText() || "{}");
   if (!completeData.ok) {
-    console.error("[postPhotoToSlackWithBlockKit] アップロード完了通知エラー", "error=" + completeResp.getContentText());
-    paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知エラー", "error=" + completeResp.getContentText());
+    paperLog("[ERROR] [postPhotoToSlackWithBlockKit] アップロード完了通知エラー", "error=" + completeResp.getContentText());
     return;
   }
 
-  console.log("[postPhotoToSlackWithBlockKit] アップロード完了");
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] アップロード完了");
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] アップロード完了");
 
   // ステップ4: ボタン付きメッセージを画像の直後に投稿
-  console.log("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
   
   const blocks = [
     {
@@ -322,16 +282,12 @@ function postPhotoToSlackWithBlockKit(file, payload) {
 
   const buttonData = JSON.parse(buttonResp.getContentText() || "{}");
   if (!buttonData.ok) {
-    console.error("[postPhotoToSlackWithBlockKit] ボタン投稿エラー", "error=" + buttonResp.getContentText());
-    paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿エラー", "error=" + buttonResp.getContentText());
+    paperLog("[ERROR] [postPhotoToSlackWithBlockKit] ボタン投稿エラー", "error=" + buttonResp.getContentText());
     return;
   }
 
   const buttonTs = buttonData.ts;
-  console.log("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
-  if (CONFIG.debugMode) {
-    paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
-  }
+  paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
 }
 
 function doGet(event) {
@@ -371,7 +327,7 @@ function doGet(event) {
 
     return HtmlService.createHtmlOutput("不明なアクションです。");
   } catch (err) {
-    console.error(err);
+    paperLog("[ERROR] doGetエラー:", err);
     return HtmlService.createHtmlOutput("処理中にエラーが発生しました。");
   }
 }
@@ -381,37 +337,31 @@ function doOptions() {
 }
 
 function moveFile(fileId, status) {
-  console.log("[moveFile] 開始", "fileId=" + fileId, "status=" + status);
   paperLog("[moveFile] 開始", "fileId=" + fileId, "status=" + status);
   
   try {
     const file = DriveApp.getFileById(fileId);
-    console.log("[moveFile] ファイル取得成功", "fileName=" + file.getName());
     paperLog("[moveFile] ファイル取得成功", "fileName=" + file.getName());
     
     const currentParents = file.getParents();
     const targetFolderId = status === STATUS.approved ? CONFIG.okFolderId : CONFIG.ngFolderId;
-    console.log("[moveFile] ターゲットフォルダID", "targetFolderId=" + targetFolderId);
     paperLog("[moveFile] ターゲットフォルダID", "targetFolderId=" + targetFolderId);
     
     const targetFolder = DriveApp.getFolderById(targetFolderId);
-    console.log("[moveFile] ターゲットフォルダ取得成功", "folderName=" + targetFolder.getName());
     paperLog("[moveFile] ターゲットフォルダ取得成功", "folderName=" + targetFolder.getName());
 
     // 現在の親フォルダからファイルを削除
     while (currentParents.hasNext()) {
       const parent = currentParents.next();
-      console.log("[moveFile] 親フォルダから削除", "parentId=" + parent.getId());
+      paperLog("[moveFile] 親フォルダから削除", "parentId=" + parent.getId());
       parent.removeFile(file);
     }
 
     // ターゲットフォルダにファイルを追加
     targetFolder.addFile(file);
-    console.log("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
     paperLog("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
   } catch (err) {
-    console.error("[moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
-    paperLog("[moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    paperLog("[ERROR] [moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
     throw err;
   }
 }
@@ -441,7 +391,7 @@ function applyCorsHeaders(output) {
     // 将来的にヘッダー設定が必要になった場合のためのプレースホルダー
     // output.setHeaders() は使用できない
   } catch (err) {
-    console.warn("applyCorsHeaders: ヘッダー設定はスキップされました", err);
+    paperLog("[WARN] applyCorsHeaders: ヘッダー設定はスキップされました", err);
   }
 }
 
@@ -569,7 +519,6 @@ function addHeaders_(output, headers, status) {
 
 function handleSlackInteractivity(event) {
   paperLog("[handleSlackInteractivity] 関数が呼ばれました");
-  console.log("[handleSlackInteractivity] 関数が呼ばれました");
   
   try {
     // 署名検証（開発時はスキップ）
@@ -597,12 +546,10 @@ function handleSlackInteractivity(event) {
       paperLog("[handleSlackInteractivity] block_actions", "action_id=" + action.action_id, "channel=" + channel, "ts=" + ts);
 
       if (action.action_id === "ok_move") {
-        console.log("[handleSlackInteractivity] OK処理開始", "fileId=" + val.fileId, "fileName=" + val.name);
         paperLog("[handleSlackInteractivity] OK処理開始", "fileId=" + val.fileId, "fileName=" + val.name);
         
         try {
           // ファイルを OK フォルダへ移動
-          console.log("[handleSlackInteractivity] moveFile呼び出し", "fileId=" + val.fileId);
           moveFile(val.fileId, STATUS.approved);
 
           // 監査ログを記録
@@ -640,15 +587,12 @@ function handleSlackInteractivity(event) {
           paperLog("[handleSlackInteractivity] chat.updateレスポンス", "ok=" + updateData.ok, "error=" + (updateData.error || "なし"));
           
           if (!updateData.ok) {
-            console.error("[handleSlackInteractivity] メッセージ更新エラー", "error=" + updateResp.getContentText());
-            paperLog("[handleSlackInteractivity] メッセージ更新エラー", "error=" + updateResp.getContentText());
+            paperLog("[ERROR] [handleSlackInteractivity] メッセージ更新エラー", "error=" + updateResp.getContentText());
           }
           
-          console.log("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
           paperLog("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
         } catch (err) {
-          console.error("[handleSlackInteractivity] OK処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
-          paperLog("[handleSlackInteractivity] OK処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+          paperLog("[ERROR] [handleSlackInteractivity] OK処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
           
           // エラーメッセージをスレッドに投稿
           UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
@@ -761,11 +705,9 @@ function handleSlackInteractivity(event) {
       const userId = payload.user?.id || "unknown";
 
       try {
-        console.log("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
         paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
 
         // ファイルを NG フォルダへ移動
-        console.log("[handleSlackInteractivity] moveFile呼び出し (NG)", "fileId=" + meta.fileId);
         moveFile(meta.fileId, STATUS.rejected);
 
         // 監査ログを記録
@@ -803,15 +745,12 @@ function handleSlackInteractivity(event) {
         paperLog("[handleSlackInteractivity] NG: chat.updateレスポンス", "ok=" + updateData.ok, "error=" + (updateData.error || "なし"));
         
         if (!updateData.ok) {
-          console.error("[handleSlackInteractivity] NG: メッセージ更新エラー", "error=" + updateResp.getContentText());
-          paperLog("[handleSlackInteractivity] NG: メッセージ更新エラー", "error=" + updateResp.getContentText());
+          paperLog("[ERROR] [handleSlackInteractivity] NG: メッセージ更新エラー", "error=" + updateResp.getContentText());
         }
         
-        console.log("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
         paperLog("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
       } catch (err) {
-        console.error("[handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
-        paperLog("[handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+        paperLog("[ERROR] [handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
         
         // エラーメッセージをスレッドに投稿
         UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
@@ -835,7 +774,7 @@ function handleSlackInteractivity(event) {
 
     return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
   } catch (err) {
-    console.error("Slack Interactivity エラー:", err);
+    paperLog("[ERROR] Slack Interactivity エラー:", err);
     return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
   }
 }
@@ -861,7 +800,6 @@ function verifySlackSignature(event) {
 }
 
 function replaceOriginalViaResponseUrl(responseUrl, baseBlocks, statusLine, removeActions) {
-  console.log("[replaceOriginalViaResponseUrl] 開始", "url=" + (responseUrl || "なし"), "statusLine=" + statusLine);
   paperLog("[replaceOriginalViaResponseUrl] 開始", "url=" + (responseUrl || "なし"), "statusLine=" + statusLine);
   
   let blocks = JSON.parse(JSON.stringify(baseBlocks || []));
@@ -883,7 +821,6 @@ function replaceOriginalViaResponseUrl(responseUrl, baseBlocks, statusLine, remo
 
   const code = resp.getResponseCode();
   const respText = resp.getContentText();
-  console.log("[replaceOriginalViaResponseUrl] レスポンス", "code=" + code, "body=" + respText.substring(0, 200));
   paperLog("[replaceOriginalViaResponseUrl] レスポンス", "code=" + code, "body=" + respText.substring(0, 200));
   
   if (code < 200 || code >= 300) {
@@ -940,7 +877,8 @@ function paperLog() {
     sh.appendRow([new Date(), msg]);
   } catch (err) {
     // スプレッドシートへの書き込みに失敗しても無視（console.log は既に出力済み）
-    console.warn("paperLog spreadsheet write failed:", err);
+    // エラーをログに記録（再帰呼び出しを避けるため、直接console.logを使用）
+    console.warn("[WARN] paperLog spreadsheet write failed:", err);
   }
 }
 
@@ -963,7 +901,7 @@ function logAudit(status, fileId, fileName, userId, reason, channelId, messageTs
     // 監査ログ用シートID（設定されていない場合はデバッグシートIDを使用）
     const sheetId = CONFIG.auditSheetId || CONFIG.debugSheetId;
     if (!sheetId) {
-      console.warn("[logAudit] シートIDが設定されていません。監査ログをスキップします。");
+      paperLog("[WARN] [logAudit] シートIDが設定されていません。監査ログをスキップします。");
       return;
     }
 
@@ -1004,9 +942,9 @@ function logAudit(status, fileId, fileName, userId, reason, channelId, messageTs
       messageTs || ""
     ]);
 
-    console.log("[logAudit] 監査ログを記録しました", "status=" + status, "fileId=" + fileId);
+    paperLog("[logAudit] 監査ログを記録しました", "status=" + status, "fileId=" + fileId);
   } catch (err) {
-    console.error("[logAudit] 監査ログ記録エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    paperLog("[ERROR] [logAudit] 監査ログ記録エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
   }
 }
 
