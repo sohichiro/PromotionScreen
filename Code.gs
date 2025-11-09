@@ -3,6 +3,9 @@ const CONFIG = {
   okFolderId: "12CurPdxu1BlWC0k_9FTdOuYcTgCNO3_R",
   ngFolderId: "1sErg8MjdKFuxVzAmJ5BTkBIykohCl4E3",
   slackWebhookUrl: "https://hooks.slack.com/services/XXXX/XXXX/XXXX",
+  slackBotToken: PropertiesService.getScriptProperties().getProperty("SLACK_BOT_TOKEN") || "",
+  slackSigningSecret: PropertiesService.getScriptProperties().getProperty("SLACK_SIGNING_SECRET") || "",
+  slackChannelId: PropertiesService.getScriptProperties().getProperty("SLACK_CHANNEL_ID") || "",
 };
 
 const META_KEYS = {
@@ -19,6 +22,15 @@ const STATUS = {
 
 function doPost(event) {
   try {
+    // Slack Interactivity リクエストかどうかを判定
+    const contentType = event?.postData?.type || "";
+    const isSlackRequest = contentType === "application/x-www-form-urlencoded" && event?.parameter?.payload;
+    
+    if (isSlackRequest) {
+      return handleSlackInteractivity(event);
+    }
+
+    // 画像アップロード処理
     if (!event?.postData?.contents) {
       return buildErrorResponse("リクエストデータが空です。", 400);
     }
@@ -80,6 +92,13 @@ function buildFileName(payload) {
 }
 
 function notifySlack(file, payload) {
+  // Bot Token が設定されている場合は Block Kit 形式で投稿
+  if (CONFIG.slackBotToken && CONFIG.slackChannelId) {
+    postPhotoToSlackWithBlockKit(file, payload);
+    return;
+  }
+
+  // フォールバック: Webhook URL を使用
   if (!CONFIG.slackWebhookUrl || CONFIG.slackWebhookUrl.includes("hooks.slack.com/services/XXXX")) {
     return;
   }
@@ -106,6 +125,71 @@ function notifySlack(file, payload) {
   };
 
   UrlFetchApp.fetch(CONFIG.slackWebhookUrl, options);
+}
+
+function postPhotoToSlackWithBlockKit(file, payload) {
+  const fileUrl = `https://drive.google.com/file/d/${file.getId()}/view`;
+  const previewUrl = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w800`;
+  const comment = payload.comment || "（なし）";
+  
+  const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}`,
+      },
+    },
+    {
+      type: "image",
+      image_url: previewUrl,
+      alt_text: file.getName(),
+    },
+    {
+      type: "actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "OK → 公開へ" },
+          style: "primary",
+          action_id: "ok_move",
+          value: JSON.stringify({ fileId: file.getId(), name: file.getName() }),
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "NG（理由入力）" },
+          style: "danger",
+          action_id: "ng_reason",
+          value: JSON.stringify({ fileId: file.getId(), name: file.getName() }),
+        },
+      ],
+    },
+    {
+      type: "context",
+      elements: [
+        {
+          type: "mrkdwn",
+          text: `<${fileUrl}|Driveで開く>`,
+        },
+      ],
+    },
+  ];
+
+  const resp = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+    method: "post",
+    headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+    payload: {
+      channel: CONFIG.slackChannelId,
+      text: "新着写真",
+      blocks: JSON.stringify(blocks),
+    },
+    muteHttpExceptions: true,
+  });
+
+  const data = JSON.parse(resp.getContentText() || "{}");
+  if (!data.ok) {
+    console.error("Slack投稿エラー:", resp.getContentText());
+  }
 }
 
 function buildReviewUrl(file, status) {
@@ -183,5 +267,233 @@ function applyCorsHeaders(output) {
     "Access-Control-Allow-Headers": "Content-Type",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   });
+}
+
+// =========================
+// Slack Interactivity 処理
+// =========================
+
+function handleSlackInteractivity(event) {
+  try {
+    // 署名検証（開発時はスキップ可能）
+    if (CONFIG.slackSigningSecret && !verifySlackSignature(event)) {
+      return ContentService.createTextOutput("invalid signature").setMimeType(ContentService.MimeType.TEXT);
+    }
+
+    const payloadRaw = event.parameter.payload || "";
+    if (!payloadRaw) {
+      return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
+    }
+
+    const payload = JSON.parse(payloadRaw);
+
+    if (payload.type === "block_actions") {
+      const action = payload.actions[0];
+      const userId = payload.user.id;
+      const channel = payload.channel.id;
+      const ts = payload.message.ts;
+      const val = JSON.parse(action.value);
+
+      if (action.action_id === "ok_move") {
+        try {
+          // 処理開始を即時表示
+          replaceOriginalViaResponseUrl(
+            payload.response_url,
+            payload.message.blocks,
+            `⏳ 処理開始 by <@${userId}>`,
+            false
+          );
+
+          // ファイルを OK フォルダへ移動
+          moveFile(val.fileId, STATUS.approved);
+
+          // 完了メッセージ + ボタン無効化
+          replaceOriginalViaResponseUrl(
+            payload.response_url,
+            payload.message.blocks,
+            `✅ 承認済み by <@${userId}> → OKフォルダへ移動しました`,
+            true
+          );
+        } catch (err) {
+          replaceOriginalViaResponseUrl(
+            payload.response_url,
+            payload.message.blocks,
+            `⚠️ OK処理エラー: ${escapeMrkdwn(String(err))}`,
+            false
+          );
+        }
+        return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
+      }
+
+      if (action.action_id === "ng_reason") {
+        try {
+          openNgModal(payload.trigger_id, val, channel, ts, payload.response_url, payload.message.blocks);
+        } catch (err) {
+          try {
+            replaceOriginalViaResponseUrl(
+              payload.response_url,
+              payload.message.blocks,
+              `⚠️ モーダル起動エラー: ${escapeMrkdwn(String(err))}`,
+              false
+            );
+          } catch (_) {}
+        }
+        return ContentService.createTextOutput("").setMimeType(ContentService.MimeType.TEXT);
+      }
+    }
+
+    if (payload.type === "view_submission" && payload.view?.callback_id === "ng_modal") {
+      const meta = JSON.parse(payload.view.private_metadata || "{}");
+      const st = payload.view.state.values;
+      const reasonSel = st.reason_block?.reason_select?.selected_option?.text?.text || "";
+      const reasonText = st.reason_block2?.reason_text?.value || "";
+      const reason = [reasonSel, reasonText].filter(Boolean).join(" / ") || "（未記入）";
+      const userId = payload.user?.id || "unknown";
+
+      try {
+        // 処理開始を即時表示
+        replaceOriginalViaResponseUrl(meta.responseUrl, meta.blocks, `⏳ NG処理開始 by <@${userId}>`, false);
+
+        // ファイルを NG フォルダへ移動
+        moveFile(meta.fileId, STATUS.rejected);
+
+        // 完了メッセージ + ボタン無効化
+        replaceOriginalViaResponseUrl(
+          meta.responseUrl,
+          meta.blocks,
+          `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → NGフォルダへ移動しました`,
+          true
+        );
+      } catch (err) {
+        replaceOriginalViaResponseUrl(
+          meta.responseUrl,
+          meta.blocks,
+          `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`,
+          false
+        );
+      }
+
+      // モーダルを閉じる
+      return ContentService.createTextOutput(JSON.stringify({ response_action: "clear" }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    return ContentService.createTextOutput("ok").setMimeType(ContentService.MimeType.TEXT);
+  } catch (err) {
+    console.error("Slack Interactivity エラー:", err);
+    return ContentService.createTextOutput("error").setMimeType(ContentService.MimeType.TEXT);
+  }
+}
+
+function verifySlackSignature(event) {
+  try {
+    const sig = event.headers["X-Slack-Signature"] || event.headers["x-slack-signature"];
+    const ts = event.headers["X-Slack-Request-Timestamp"] || event.headers["x-slack-request-timestamp"];
+    if (!sig || !ts) return false;
+
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - Number(ts)) > 60 * 5) return false;
+
+    const body = event.postData?.contents || "";
+    const base = `v0:${ts}:${body}`;
+    const mac = Utilities.computeHmacSha256Signature(base, CONFIG.slackSigningSecret);
+    const hex = mac.map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+    const expected = `v0=${hex}`;
+    return sig === expected;
+  } catch (_) {
+    return false;
+  }
+}
+
+function openNgModal(triggerId, val, channel, ts, responseUrl, baseBlocks) {
+  const view = {
+    type: "modal",
+    callback_id: "ng_modal",
+    title: { type: "plain_text", text: "NG理由" },
+    submit: { type: "plain_text", text: "送信" },
+    close: { type: "plain_text", text: "キャンセル" },
+    private_metadata: JSON.stringify({
+      fileId: val.fileId,
+      name: val.name,
+      channel,
+      ts,
+      responseUrl,
+      blocks: baseBlocks,
+    }),
+    blocks: [
+      {
+        type: "input",
+        block_id: "reason_block",
+        label: { type: "plain_text", text: "NG理由（選択）" },
+        element: {
+          type: "static_select",
+          action_id: "reason_select",
+          placeholder: { type: "plain_text", text: "選択してください" },
+          options: [
+            { text: { type: "plain_text", text: "不適切な内容" }, value: "inappropriate" },
+            { text: { type: "plain_text", text: "肖像権・著作権の懸念" }, value: "rights" },
+            { text: { type: "plain_text", text: "画質/縦横比が基準外" }, value: "quality" },
+            { text: { type: "plain_text", text: "重複アップロード" }, value: "duplicate" },
+            { text: { type: "plain_text", text: "その他" }, value: "other" },
+          ],
+        },
+      },
+      {
+        type: "input",
+        block_id: "reason_block2",
+        optional: true,
+        label: { type: "plain_text", text: "補足（任意）" },
+        element: {
+          type: "plain_text_input",
+          action_id: "reason_text",
+          multiline: true,
+          placeholder: { type: "plain_text", text: "詳細やメモを入力" },
+        },
+      },
+    ],
+  };
+
+  const resp = UrlFetchApp.fetch("https://slack.com/api/views.open", {
+    method: "post",
+    headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+    payload: { trigger_id: triggerId, view: JSON.stringify(view) },
+    muteHttpExceptions: true,
+  });
+
+  const data = JSON.parse(resp.getContentText() || "{}");
+  if (!data.ok) {
+    throw new Error("views.open failed: " + resp.getContentText());
+  }
+}
+
+function replaceOriginalViaResponseUrl(responseUrl, baseBlocks, statusLine, removeActions) {
+  let blocks = JSON.parse(JSON.stringify(baseBlocks || []));
+  if (removeActions) {
+    blocks = blocks.filter((b) => b.type !== "actions");
+  }
+  blocks.push({ type: "context", elements: [{ type: "mrkdwn", text: statusLine }] });
+
+  const resp = UrlFetchApp.fetch(responseUrl, {
+    method: "post",
+    contentType: "application/json",
+    payload: JSON.stringify({
+      replace_original: true,
+      text: statusLine,
+      blocks: blocks,
+    }),
+    muteHttpExceptions: true,
+  });
+
+  const code = resp.getResponseCode();
+  if (code < 200 || code >= 300) {
+    throw new Error("response_url update failed: " + code + " " + resp.getContentText());
+  }
+}
+
+function escapeMrkdwn(s) {
+  return String(s || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
