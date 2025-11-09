@@ -467,7 +467,7 @@ function moveFile(fileId, status, reason, includeReasonInEmail) {
       const emailReason = (status === STATUS.rejected && !includeReasonInEmail) ? "" : (reason || "");
       const maskedEmailForLog = email.indexOf("@") > 0 ? email.substring(0, email.indexOf("@")) + "@***" : email.substring(0, 3) + "***";
       paperLog("[moveFile] メール送信を開始", "email=" + maskedEmailForLog, "status=" + status, "hasReason=" + !!emailReason, "includeReasonInEmail=" + includeReasonInEmail, "reasonLength=" + (emailReason?.length || 0));
-      sendReviewResultEmail(email, file.getName(), status, emailReason);
+      sendReviewResultEmail(email, file.getName(), status, emailReason, fileId);
     } else {
       paperLog("[moveFile] メールアドレスなしのためメール送信スキップ", "fileId=" + fileId);
     }
@@ -477,7 +477,7 @@ function moveFile(fileId, status, reason, includeReasonInEmail) {
   }
 }
 
-function sendReviewResultEmail(email, fileName, status, reason) {
+function sendReviewResultEmail(email, fileName, status, reason, fileId) {
   // メールアドレスのマスキング用ヘルパー
   const maskEmail = (addr) => {
     if (!addr) return "なし";
@@ -487,7 +487,7 @@ function sendReviewResultEmail(email, fileName, status, reason) {
   const maskedEmail = maskEmail(email);
   
   try {
-    paperLog("[sendReviewResultEmail] 開始", "email=" + maskedEmail, "fileName=" + fileName, "status=" + status, "hasReason=" + !!reason, "reasonLength=" + (reason?.length || 0));
+    paperLog("[sendReviewResultEmail] 開始", "email=" + maskedEmail, "fileName=" + fileName, "status=" + status, "hasReason=" + !!reason, "reasonLength=" + (reason?.length || 0), "fileId=" + fileId);
     
     const subject = status === STATUS.approved 
       ? "【審査結果】画像が承認されました"
@@ -516,13 +516,37 @@ function sendReviewResultEmail(email, fileName, status, reason) {
     
     paperLog("[sendReviewResultEmail] メール送信準備完了", "to=" + maskedEmail, "subject=" + subject, "bodyLength=" + body.length, "hasReasonInBody=" + body.includes("【理由】"));
     
-    MailApp.sendEmail({
+    // 自分のメールアドレスを取得（BCC用）
+    let bccEmail = "";
+    try {
+      bccEmail = Session.getActiveUser().getEmail();
+      paperLog("[sendReviewResultEmail] BCC用メールアドレス取得", "bccEmail=" + maskEmail(bccEmail));
+    } catch (e) {
+      paperLog("[WARN] [sendReviewResultEmail] BCC用メールアドレス取得失敗", "error=" + String(e));
+    }
+    
+    const emailOptions = {
       to: email,
       subject: subject,
       body: body
-    });
+    };
+    
+    // BCCが取得できた場合のみ追加
+    if (bccEmail) {
+      emailOptions.bcc = bccEmail;
+    }
+    
+    MailApp.sendEmail(emailOptions);
     
     paperLog("[sendReviewResultEmail] メール送信成功", "email=" + maskedEmail, "subject=" + subject);
+    
+    // メール送信のログをlogAuditで記録
+    if (fileId) {
+      const emailStatus = status === STATUS.approved ? "EMAIL_OK" : "EMAIL_NG";
+      const emailReason = reason || "";
+      logAudit(emailStatus, fileId, fileName, "system", emailReason, "", "");
+      paperLog("[sendReviewResultEmail] メール送信ログを記録", "fileId=" + fileId, "status=" + emailStatus);
+    }
   } catch (err) {
     paperLog("[ERROR] [sendReviewResultEmail] メール送信エラー", "email=" + maskedEmail, "error=" + String(err), "errorName=" + (err.name || "なし"), "errorMessage=" + (err.message || "なし"), "stack=" + (err.stack || "なし"));
     // メール送信エラーは処理を続行する（ファイル移動は成功しているため）
