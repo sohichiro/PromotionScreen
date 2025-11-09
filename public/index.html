@@ -175,6 +175,19 @@
       border-color: rgba(231, 76, 60, .35);
     }
 
+    .badge.button {
+      cursor: pointer;
+      transition: opacity 0.2s ease;
+    }
+
+    .badge.button:hover {
+      opacity: 0.8;
+    }
+
+    .badge.button:active {
+      opacity: 0.6;
+    }
+
     #clock-fixed {
       position: absolute;
       right: calc(env(safe-area-inset-right) + 16px);
@@ -239,6 +252,8 @@
 
         <span class="badge" id="badge-updated">—</span>
 
+        <span class="badge button" id="badge-reload" style="display: none;">再読み込み</span>
+
       </div>
     </div>
     <div id="layerA" class="layer"></div>
@@ -246,7 +261,6 @@
     <div id="clock-fixed">--:--:--</div>
     <div id="hint">トリプルタップでステータス表示 / 表示中はダブルタップで全画面 / 2本指で一時停止</div>
     <div id="hud">
-      <div class="pill">新しい写真ほど表示頻度↑</div>
       <div class="pill" id="status">—</div>
     </div>
 
@@ -273,9 +287,12 @@
 
     // === UI 表示/非表示トグル ===
     let statusVisible = false; // 初期状態: 非表示
+    const badgeReload = document.getElementById('badge-reload');
     function setStatusVisible(v) {
       statusVisible = v;
       document.body.classList.toggle('status-visible', v);
+      // ステータス表示時に再読み込みボタンを表示
+      badgeReload.style.display = v ? 'block' : 'none';
     }
     // 起動時に反映
     setStatusVisible(statusVisible);
@@ -605,6 +622,15 @@
     window.addEventListener('touchcancel', () => {
       multiTouchGesture = false;
     }, { passive: true });
+
+    // 再読み込みボタンのクリックイベント
+    badgeReload.addEventListener('click', async () => {
+      badgeReload.textContent = '読み込み中...';
+      badgeReload.style.pointerEvents = 'none';
+      await fetchList();
+      badgeReload.textContent = '再読み込み';
+      badgeReload.style.pointerEvents = 'auto';
+    });
   </script>
 
 </body>
