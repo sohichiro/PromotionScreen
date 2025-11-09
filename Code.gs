@@ -12,6 +12,7 @@ const CONFIG = {
   // その他の設定
   sharedSecret: PropertiesService.getScriptProperties().getProperty("SHARED_SECRET") || "TEMP_SECRET",
   debugSheetId: PropertiesService.getScriptProperties().getProperty("DEBUG_SHEET_ID") || "",
+  auditSheetId: PropertiesService.getScriptProperties().getProperty("AUDIT_SHEET_ID") || "",
 };
 
 const META_KEYS = {
@@ -558,6 +559,9 @@ function handleSlackInteractivity(event) {
           console.log("[handleSlackInteractivity] moveFile呼び出し", "fileId=" + val.fileId);
           moveFile(val.fileId, STATUS.approved);
 
+          // 監査ログを記録
+          logAudit("OK", val.fileId, val.name, userId, "", channel, ts);
+
           // メッセージを更新してボタンを無効化し、完了ステータスを追加
           let updatedBlocks = JSON.parse(JSON.stringify(payload.message.blocks || []));
           paperLog("[handleSlackInteractivity] 元のブロック数", "count=" + updatedBlocks.length);
@@ -718,6 +722,9 @@ function handleSlackInteractivity(event) {
         console.log("[handleSlackInteractivity] moveFile呼び出し (NG)", "fileId=" + meta.fileId);
         moveFile(meta.fileId, STATUS.rejected);
 
+        // 監査ログを記録
+        logAudit("NG", meta.fileId, meta.name, userId, reason, meta.channel, meta.ts);
+
         // メッセージを更新してボタンを無効化し、完了ステータスを追加
         let updatedBlocks = JSON.parse(JSON.stringify(meta.blocks || []));
         paperLog("[handleSlackInteractivity] NG: 元のブロック数", "count=" + updatedBlocks.length);
@@ -877,6 +884,72 @@ function paperLog() {
   } catch (err) {
     // スプレッドシートへの書き込みに失敗しても無視（console.log は既に出力済み）
     console.warn("paperLog spreadsheet write failed:", err);
+  }
+}
+
+// =========================
+// 監査ログ機能
+// =========================
+
+/**
+ * OK/NG審査結果を監査ログとしてスプレッドシートに記録
+ * @param {string} status - "OK" または "NG"
+ * @param {string} fileId - ファイルID
+ * @param {string} fileName - ファイル名
+ * @param {string} userId - SlackユーザーID
+ * @param {string} reason - NG理由（NGの場合のみ）
+ * @param {string} channelId - SlackチャンネルID
+ * @param {string} messageTs - SlackメッセージTS
+ */
+function logAudit(status, fileId, fileName, userId, reason, channelId, messageTs) {
+  try {
+    // 監査ログ用シートID（設定されていない場合はデバッグシートIDを使用）
+    const sheetId = CONFIG.auditSheetId || CONFIG.debugSheetId;
+    if (!sheetId) {
+      console.warn("[logAudit] シートIDが設定されていません。監査ログをスキップします。");
+      return;
+    }
+
+    const ss = SpreadsheetApp.openById(sheetId);
+    // 監査ログ用シートIDが設定されている場合は専用シートを使用、そうでない場合は最初のシートを使用
+    let sh;
+    if (CONFIG.auditSheetId) {
+      // 監査ログ用シートを取得または作成
+      sh = ss.getSheetByName("監査ログ") || ss.insertSheet("監査ログ");
+    } else {
+      // デバッグシートIDを使用する場合は、既存のシートに追加
+      sh = ss.getSheets()[0];
+    }
+
+    // 見出しが無ければ作成
+    if (sh.getLastRow() === 0) {
+      sh.appendRow([
+        "タイムスタンプ",
+        "ステータス",
+        "ファイルID",
+        "ファイル名",
+        "ユーザーID",
+        "NG理由",
+        "チャンネルID",
+        "メッセージTS"
+      ]);
+    }
+
+    // 監査ログを記録
+    sh.appendRow([
+      new Date(),
+      status,
+      fileId,
+      fileName,
+      userId,
+      reason || "",
+      channelId || "",
+      messageTs || ""
+    ]);
+
+    console.log("[logAudit] 監査ログを記録しました", "status=" + status, "fileId=" + fileId);
+  } catch (err) {
+    console.error("[logAudit] 監査ログ記録エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
   }
 }
 
