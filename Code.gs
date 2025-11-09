@@ -835,20 +835,25 @@ function handleSlackInteractivity(event) {
         paperLog("[ERROR] [handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
         
         // エラーメッセージをスレッドに投稿
-        UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
-          method: "post",
-          headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
-          contentType: "application/json",
-          payload: JSON.stringify({
-            channel: meta.channel,
-            thread_ts: meta.ts,
-            text: `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`
-          }),
-          muteHttpExceptions: true,
-        });
+        try {
+          UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+            method: "post",
+            headers: { Authorization: "Bearer " + CONFIG.slackBotToken },
+            contentType: "application/json",
+            payload: JSON.stringify({
+              channel: meta.channel,
+              thread_ts: meta.ts,
+              text: `⚠️ NG処理エラー: ${escapeMrkdwn(String(err))}`
+            }),
+            muteHttpExceptions: true,
+          });
+        } catch (postErr) {
+          paperLog("[ERROR] [handleSlackInteractivity] エラーメッセージ投稿失敗", "error=" + String(postErr));
+        }
       }
 
       // モーダルを閉じる（空のレスポンスを返す）
+      // エラーが発生してもモーダルは閉じる
       paperLog("[handleSlackInteractivity] view_submission処理完了、モーダルを閉じます");
       return ContentService.createTextOutput("")
         .setMimeType(ContentService.MimeType.TEXT);
