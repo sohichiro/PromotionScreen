@@ -165,24 +165,20 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   paperLog("[postPhotoToSlackWithBlockKit] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
   
   const fileUrl = `https://drive.google.com/file/d/${file.getId()}/view`;
-  const previewUrl = `https://drive.google.com/thumbnail?id=${file.getId()}&sz=w800`;
   const comment = payload.comment || "（なし）";
   
   console.log("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"));
-  paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "previewUrl=" + previewUrl);
+  paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId);
   
+  // Google Drive の画像URLは Slack が直接アクセスできないため、画像ブロックは使用しない
+  // 代わりにファイルへのリンクを表示
   const blocks = [
     {
       type: "section",
       text: {
         type: "mrkdwn",
-        text: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}`,
+        text: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}\n\n<${fileUrl}|📷 Driveで画像を開く>`,
       },
-    },
-    {
-      type: "image",
-      image_url: previewUrl,
-      alt_text: file.getName(),
     },
     {
       type: "actions",
@@ -200,15 +196,6 @@ function postPhotoToSlackWithBlockKit(file, payload) {
           style: "danger",
           action_id: "ng_reason",
           value: JSON.stringify({ fileId: file.getId(), name: file.getName() }),
-        },
-      ],
-    },
-    {
-      type: "context",
-      elements: [
-        {
-          type: "mrkdwn",
-          text: `<${fileUrl}|Driveで開く>`,
         },
       ],
     },
