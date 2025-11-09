@@ -160,12 +160,12 @@ function postPhotoToSlackWithBlockKit(file, payload) {
     method: "post",
     headers: {
       "Authorization": "Bearer " + CONFIG.slackBotToken,
-      "Content-Type": "application/json; charset=utf-8"
+      "Content-Type": "application/x-www-form-urlencoded"
     },
-    payload: JSON.stringify({
+    payload: {
       filename: file.getName(),
       length: fileSize
-    }),
+    },
     muteHttpExceptions: true,
   });
 
