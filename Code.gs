@@ -13,6 +13,8 @@ const CONFIG = {
   sharedSecret: PropertiesService.getScriptProperties().getProperty("SHARED_SECRET") || "TEMP_SECRET",
   debugSheetId: PropertiesService.getScriptProperties().getProperty("DEBUG_SHEET_ID") || "",
   auditSheetId: PropertiesService.getScriptProperties().getProperty("AUDIT_SHEET_ID") || "",
+  // デバッグモード（trueの場合のみスプレッドシートにログを書き込む）
+  debugMode: PropertiesService.getScriptProperties().getProperty("DEBUG_MODE") === "true",
 };
 
 const META_KEYS = {
@@ -30,36 +32,48 @@ const STATUS = {
 function doPost(event) {
   // 最初に必ずログを出力（doPost が呼ばれているか確認）
   console.log("[doPost] 関数が呼ばれました", new Date().toISOString());
-  paperLog("[doPost] 関数が呼ばれました");
+  if (CONFIG.debugMode) {
+    paperLog("[doPost] 関数が呼ばれました");
+  }
   
   try {
-    paperLog("[doPost] リクエスト受信", "contentType=" + (event?.postData?.type || "なし"), "hasPostData=" + !!event?.postData);
-    paperLog("[doPost] CONFIG確認", "slackBotToken=" + (CONFIG.slackBotToken ? "設定済み(" + CONFIG.slackBotToken.substring(0, 10) + "...)" : "未設定"), "slackChannelId=" + (CONFIG.slackChannelId || "未設定"));
+    if (CONFIG.debugMode) {
+      paperLog("[doPost] リクエスト受信", "contentType=" + (event?.postData?.type || "なし"), "hasPostData=" + !!event?.postData);
+      paperLog("[doPost] CONFIG確認", "slackBotToken=" + (CONFIG.slackBotToken ? "設定済み(" + CONFIG.slackBotToken.substring(0, 10) + "...)" : "未設定"), "slackChannelId=" + (CONFIG.slackChannelId || "未設定"));
+    }
     
     // Slack Interactivity リクエストかどうかを判定
     const contentType = event?.postData?.type || "";
     const isSlackRequest = contentType === "application/x-www-form-urlencoded" && event?.parameter?.payload;
     
     if (isSlackRequest) {
-      paperLog("[doPost] Slack Interactivity リクエストとして処理");
+      if (CONFIG.debugMode) {
+        paperLog("[doPost] Slack Interactivity リクエストとして処理");
+      }
       return handleSlackInteractivity(event);
     }
 
     // 画像アップロード処理
-    paperLog("[doPost] 画像アップロード処理を開始");
+    if (CONFIG.debugMode) {
+      paperLog("[doPost] 画像アップロード処理を開始");
+    }
     if (!event?.postData?.contents) {
       paperLog("[doPost] エラー: リクエストデータが空");
       return buildErrorResponse("リクエストデータが空です。", 400);
     }
 
     const payload = JSON.parse(event.postData.contents);
-    paperLog("[doPost] ペイロード解析完了", "filename=" + (payload.filename || "なし"), "hasPhotoBase64=" + !!payload.photoBase64);
+    if (CONFIG.debugMode) {
+      paperLog("[doPost] ペイロード解析完了", "filename=" + (payload.filename || "なし"), "hasPhotoBase64=" + !!payload.photoBase64);
+    }
     
     validatePayload(payload);
 
     const folder = DriveApp.getFolderById(CONFIG.inboxFolderId);
     const filename = buildFileName(payload);
-    paperLog("[doPost] ファイル作成開始", "filename=" + filename, "folderId=" + CONFIG.inboxFolderId);
+    if (CONFIG.debugMode) {
+      paperLog("[doPost] ファイル作成開始", "filename=" + filename, "folderId=" + CONFIG.inboxFolderId);
+    }
     
     const blob = createBlob(payload, filename);
     const file = folder.createFile(blob);
@@ -76,12 +90,16 @@ function doPost(event) {
     
     // setProperty は使えないため、メタデータはファイル名や説明に含める
     // 必要に応じて、後で Drive API v3 を使ってプロパティを設定することも可能
-    paperLog("[doPost] ファイル作成完了", "fileId=" + file.getId(), "fileName=" + file.getName(), "metadata=" + JSON.stringify(metadata));
-    paperLog("[doPost] Slack通知を開始");
+    if (CONFIG.debugMode) {
+      paperLog("[doPost] ファイル作成完了", "fileId=" + file.getId(), "fileName=" + file.getName(), "metadata=" + JSON.stringify(metadata));
+      paperLog("[doPost] Slack通知を開始");
+    }
 
     notifySlack(file, payload);
 
-    paperLog("[doPost] 処理完了", "fileId=" + file.getId());
+    if (CONFIG.debugMode) {
+      paperLog("[doPost] 処理完了", "fileId=" + file.getId());
+    }
     return buildJsonResponse({ ok: true, fileId: file.getId(), id: file.getId() });
   } catch (err) {
     paperLog("[doPost] エラー発生", "error=" + String(err), "stack=" + (err.stack || "なし"));
@@ -126,33 +144,45 @@ function buildFileName(payload) {
 
 function notifySlack(file, payload) {
   console.log("[notifySlack] 関数が呼ばれました", "fileId=" + file.getId(), "fileName=" + file.getName());
-  paperLog("[notifySlack] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
+  if (CONFIG.debugMode) {
+    paperLog("[notifySlack] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
+  }
   
   // Bot Token が設定されている場合は Block Kit 形式で投稿
   if (CONFIG.slackBotToken && CONFIG.slackChannelId) {
     console.log("[notifySlack] Block Kit 形式で投稿を試みます", "botToken設定=" + !!CONFIG.slackBotToken, "channelId=" + CONFIG.slackChannelId);
-    paperLog("[notifySlack] Block Kit 形式で投稿を試みます", "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"), "channelId=" + CONFIG.slackChannelId);
+    if (CONFIG.debugMode) {
+      paperLog("[notifySlack] Block Kit 形式で投稿を試みます", "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"), "channelId=" + CONFIG.slackChannelId);
+    }
     postPhotoToSlackWithBlockKit(file, payload);
     return;
   }
 
   // Bot Token が未設定の場合はスキップ
-  paperLog("[notifySlack] Bot Token が未設定のため、Slack通知をスキップします");
+  if (CONFIG.debugMode) {
+    paperLog("[notifySlack] Bot Token が未設定のため、Slack通知をスキップします");
+  }
 }
 
 function postPhotoToSlackWithBlockKit(file, payload) {
   console.log("[postPhotoToSlackWithBlockKit] 関数が呼ばれました", "fileId=" + file.getId(), "fileName=" + file.getName());
-  paperLog("[postPhotoToSlackWithBlockKit] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] 開始", "fileId=" + file.getId(), "fileName=" + file.getName());
+  }
   
   const fileUrl = `https://drive.google.com/file/d/${file.getId()}/view`;
   const comment = payload.comment || "（なし）";
   
   console.log("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"));
-  paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId);
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId);
+  }
   
   // ステップ1: アップロードURLを取得
   console.log("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
-  paperLog("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
+  }
   
   const blob = file.getBlob();
   const fileSize = blob.getBytes().length;
@@ -177,11 +207,15 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   }
 
   console.log("[postPhotoToSlackWithBlockKit] URL取得成功");
-  paperLog("[postPhotoToSlackWithBlockKit] URL取得成功");
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] URL取得成功");
+  }
 
   // ステップ2: 画像をアップロード
   console.log("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
-  paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
+  }
   
   const uploadResp = UrlFetchApp.fetch(urlData.upload_url, {
     method: "post",
@@ -197,11 +231,15 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   }
 
   console.log("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
-  paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
+  }
 
   // ステップ3: アップロード完了を通知（チャンネルに投稿）
   console.log("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
-  paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
+  }
   
   const completeResp = UrlFetchApp.fetch("https://slack.com/api/files.completeUploadExternal", {
     method: "post",
@@ -228,11 +266,15 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   }
 
   console.log("[postPhotoToSlackWithBlockKit] アップロード完了");
-  paperLog("[postPhotoToSlackWithBlockKit] アップロード完了");
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] アップロード完了");
+  }
 
   // ステップ4: ボタン付きメッセージを画像の直後に投稿
   console.log("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
-  paperLog("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
+  }
   
   const blocks = [
     {
@@ -287,7 +329,9 @@ function postPhotoToSlackWithBlockKit(file, payload) {
 
   const buttonTs = buttonData.ts;
   console.log("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
-  paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
+  if (CONFIG.debugMode) {
+    paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonTs);
+  }
 }
 
 function doGet(event) {
@@ -856,6 +900,12 @@ function escapeMrkdwn(s) {
 // ログ機能
 // =========================
 
+/**
+ * ログ出力関数
+ * - 常にconsole.logで出力（Apps Scriptの実行ログで確認可能）
+ * - デバッグモードが有効な場合のみスプレッドシートに書き込む（パフォーマンス考慮）
+ * @param {...any} args - ログメッセージ（複数可）
+ */
 function paperLog() {
   // 引数を全部連結
   const msg = Array.from(arguments)
@@ -864,6 +914,11 @@ function paperLog() {
 
   // 常に console.log で出力（Apps Script の実行ログで確認可能）
   console.log("[LOG]", new Date().toISOString(), msg);
+
+  // デバッグモードが有効な場合のみスプレッドシートに出力（パフォーマンス考慮）
+  if (!CONFIG.debugMode) {
+    return;
+  }
 
   // スプレッドシートにも出力（設定されている場合）
   try {
