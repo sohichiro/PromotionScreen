@@ -1,21 +1,4 @@
-const CONFIG = {
-  inboxFolderId: PropertiesService.getScriptProperties().getProperty("INBOX_FOLDER_ID") || "",
-  okFolderId: PropertiesService.getScriptProperties().getProperty("OK_FOLDER_ID") || "",
-  ngFolderId: PropertiesService.getScriptProperties().getProperty("NG_FOLDER_ID") || "",
-  slackBotToken: PropertiesService.getScriptProperties().getProperty("SLACK_BOT_TOKEN") || "",
-  slackSigningSecret: PropertiesService.getScriptProperties().getProperty("SLACK_SIGNING_SECRET") || "",
-  slackChannelId: PropertiesService.getScriptProperties().getProperty("SLACK_CHANNEL_ID") || "",
-  // サイネージ設定（表示用）
-  signageFolderId: PropertiesService.getScriptProperties().getProperty("SIGNAGE_FOLDER_ID") || "", // 未設定の場合はokFolderIdを使用
-  signageExpiresMs: 24 * 60 * 60 * 1000,
-  signageAllowOrigin: '*',
-  // その他の設定
-  sharedSecret: PropertiesService.getScriptProperties().getProperty("SHARED_SECRET") || "TEMP_SECRET",
-  auditSheetId: PropertiesService.getScriptProperties().getProperty("AUDIT_SHEET_ID") || "",
-  // デバッグモード（trueの場合のみスプレッドシートにログを書き込む）
-  debugMode: PropertiesService.getScriptProperties().getProperty("DEBUG_MODE") === "true",
-  debugSheetId: PropertiesService.getScriptProperties().getProperty("DEBUG_SHEET_ID") || "",
-};
+// 設定は Config.gs で管理されています
 
 const META_KEYS = {
   comment: "comment",
