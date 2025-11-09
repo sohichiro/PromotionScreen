@@ -1,6 +1,7 @@
 const form = document.getElementById("upload-form");
 const photoInput = document.getElementById("photo-input");
 const commentInput = document.getElementById("comment-input");
+const emailInput = document.getElementById("email-input");
 const permissionCheckbox = document.getElementById("permission-checkbox");
 const submitButton = document.getElementById("submit-button");
 const preview = document.getElementById("preview");
@@ -69,7 +70,7 @@ const updatePreview = () => {
   const reader = new FileReader();
   reader.onload = () => {
     previewImage.src = reader.result;
-    previewImage.alt = "選択された写真のプレビュー";
+    previewImage.alt = "選択された画像のプレビュー";
     preview.classList.add("preview--has-image");
   };
   reader.readAsDataURL(file);
@@ -101,11 +102,13 @@ const submitPhoto = async () => {
 
   const [file] = photoInput.files;
   const base64 = await toBase64(file);
+  const email = emailInput.value.trim();
   const payload = {
     filename: file.name,
     mimeType: file.type,
     size: file.size,
     comment: commentInput.value.trim(),
+    email: email || undefined, // 空文字列の場合はundefinedにして送信しない
     timestamp: new Date().toISOString(),
     photoBase64: base64,
   };
