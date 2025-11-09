@@ -1,4 +1,6 @@
 /**
+ * @fileoverview Google Apps Script (JavaScript) - PromotionScreen
+ * @language javascript
  * =========================
  * 設定管理
  * =========================
@@ -1194,29 +1196,60 @@ function handleSlackInteractivity(event) {
       const includeReasonInEmail = st.email_notify_block?.email_notify?.selected_options?.length > 0;
       paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason, "includeReasonInEmail=" + includeReasonInEmail);
 
+      // 1. 非同期で実行したいデータを作成
+      const asyncPayload = {
+        action: "handleAsyncNGProcessing", // ★doPostの処理分岐に使う
+        fileId: meta.fileId,
+        fileName: meta.name,
+        reason: reason,
+        includeReasonInEmail: includeReasonInEmail,
+        userId: userId,
+        channel: meta.channel,
+        ts: meta.ts,
+        blocks: meta.blocks, // private_metadataから渡されたもの
+        timestamp: new Date().toISOString()
+      };
+
+      try {
+        // 2. 自分のWeb App URLに対して、非同期でPOSTリクエストを送信
+          const options = {
+            method: "post",
+            contentType: "application/json",
+            payload: JSON.stringify(asyncPayload),
+            muteHttpExceptions: true // ★重要: 応答を待たず、エラーでも続行
+        };
+        
+        // 自分のWeb App URLを取得して実行（デプロイメントIDが必要な場合は調整）
+        // このfetchは「投げっぱなし」になり、ack()のreturnをブロックしません。
+        UrlFetchApp.fetch(ScriptApp.getService().getUrl(), options);
+  
+      } catch (asyncErr) {
+        paperLog("[ERROR] [handleSlackInteractivity] 非同期トリガーエラー", "error=" + String(asyncErr));
+      }
+
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
       // 処理データをキューに保存し、すぐにレスポンスを返す
       
-      try {
-        const queueData = {
-          fileId: meta.fileId,
-          fileName: meta.name,
-          reason: reason,
-          includeReasonInEmail: includeReasonInEmail,
-          userId: userId,
-          channel: meta.channel,
-          ts: meta.ts,
-          blocks: meta.blocks,
-          timestamp: new Date().toISOString()
-        };
+      // try {
+      //   const queueData = {
+      //     fileId: meta.fileId,
+      //     fileName: meta.name,
+      //     reason: reason,
+      //     includeReasonInEmail: includeReasonInEmail,
+      //     userId: userId,
+      //     channel: meta.channel,
+      //     ts: meta.ts,
+      //     blocks: meta.blocks,
+      //     timestamp: new Date().toISOString()
+      //   };
         
-        // キューに保存（軽い処理）
-        enqueueNGProcessing(queueData);
+      //   // キューに保存（軽い処理）
+      //   enqueueNGProcessing(queueData);
         
-        paperLog("[handleSlackInteractivity] NG処理をキューに追加", "fileId=" + meta.fileId);
-      } catch (queueErr) {
-        paperLog("[ERROR] [handleSlackInteractivity] キュー追加エラー", "error=" + String(queueErr));
-      }
+      //   paperLog("[handleSlackInteractivity] NG処理をキューに追加", "fileId=" + meta.fileId);
+      // } catch (queueErr) {
+      //   paperLog("[ERROR] [handleSlackInteractivity] キュー追加エラー", "error=" + String(queueErr));
+      // }
 
       // ★ 最優先: モーダルを即座に閉じる（3秒タイムアウト対策）
       // 何もせずにすぐにレスポンスを返す
