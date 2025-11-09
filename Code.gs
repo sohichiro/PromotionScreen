@@ -207,7 +207,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
         title: file.getName()
       }],
       channel_id: CONFIG.slackChannelId,
-      initial_comment: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\n${new Date().toLocaleString("ja-JP")}\nコメント: ${escapeMrkdwn(comment)}\n<${fileUrl}|📷 Driveで画像を開く>`
+      initial_comment: `*${escapeMrkdwn(file.getName())}*\n${new Date().toLocaleString("ja-JP")}\nコメント: ${escapeMrkdwn(comment)}\n<${fileUrl}|📷 Driveで画像を開く>`
     }),
     muteHttpExceptions: true,
   });
