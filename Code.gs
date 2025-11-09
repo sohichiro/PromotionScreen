@@ -129,9 +129,9 @@ function doPost(event) {
     const payload = JSON.parse(event.postData.contents);
     
     // 非同期NG処理リクエストの場合
-    if (payload.action === "processNG") {
+    if (payload.action === "handleAsyncNGProcessing" || payload.action === "processNG") {
       if (CONFIG.debugMode) {
-        paperLog("[doPost] 非同期NG処理リクエストとして処理");
+        paperLog("[doPost] 非同期NG処理リクエストとして処理", "action=" + payload.action);
       }
       return handleAsyncNGProcessing(payload);
     }
