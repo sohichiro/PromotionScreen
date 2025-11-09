@@ -149,69 +149,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   console.log("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId, "botToken=" + (CONFIG.slackBotToken ? "設定済み" : "未設定"));
   paperLog("[postPhotoToSlackWithBlockKit] リクエスト準備", "channelId=" + CONFIG.slackChannelId);
   
-  // ステップ1: 先にボタン付きメッセージを投稿
-  console.log("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
-  paperLog("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
-  
-  const blocks = [
-    {
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}\n\n<${fileUrl}|📷 Driveで画像を開く>`
-      }
-    },
-    {
-      type: "divider"
-    },
-    {
-      type: "actions",
-      block_id: "review_actions",
-      elements: [
-        {
-          type: "button",
-          text: { type: "plain_text", text: "OK → 公開へ" },
-          style: "primary",
-          action_id: "ok_move",
-          value: JSON.stringify({ fileId: file.getId(), name: file.getName() }),
-        },
-        {
-          type: "button",
-          text: { type: "plain_text", text: "NG（理由入力）" },
-          style: "danger",
-          action_id: "ng_reason",
-          value: JSON.stringify({ fileId: file.getId(), name: file.getName() }),
-        },
-      ],
-    }
-  ];
-
-  const messageResp = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
-    method: "post",
-    headers: { 
-      Authorization: "Bearer " + CONFIG.slackBotToken
-    },
-    contentType: "application/json",
-    payload: JSON.stringify({
-      channel: CONFIG.slackChannelId,
-      text: "新着写真",
-      blocks: blocks,
-    }),
-    muteHttpExceptions: true,
-  });
-
-  const messageData = JSON.parse(messageResp.getContentText() || "{}");
-  if (!messageData.ok) {
-    console.error("[postPhotoToSlackWithBlockKit] メッセージ投稿エラー", "error=" + messageResp.getContentText());
-    paperLog("[postPhotoToSlackWithBlockKit] メッセージ投稿エラー", "error=" + messageResp.getContentText());
-    return;
-  }
-
-  const messageTs = messageData.ts;
-  console.log("[postPhotoToSlackWithBlockKit] メッセージ投稿成功", "ts=" + messageTs);
-  paperLog("[postPhotoToSlackWithBlockKit] メッセージ投稿成功", "ts=" + messageTs);
-
-  // ステップ2: アップロードURLを取得
+  // ステップ1: アップロードURLを取得
   console.log("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
   paperLog("[postPhotoToSlackWithBlockKit] アップロードURL取得開始");
   
@@ -240,7 +178,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   console.log("[postPhotoToSlackWithBlockKit] URL取得成功");
   paperLog("[postPhotoToSlackWithBlockKit] URL取得成功");
 
-  // ステップ3: 画像をアップロード
+  // ステップ2: 画像をアップロード
   console.log("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
   paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード開始");
   
@@ -260,7 +198,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   console.log("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
   paperLog("[postPhotoToSlackWithBlockKit] 画像アップロード成功");
 
-  // ステップ4: アップロード完了を通知（スレッドに投稿）
+  // ステップ3: アップロード完了を通知（チャンネルに投稿）
   console.log("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
   paperLog("[postPhotoToSlackWithBlockKit] アップロード完了通知開始");
   
@@ -276,7 +214,7 @@ function postPhotoToSlackWithBlockKit(file, payload) {
         title: file.getName()
       }],
       channel_id: CONFIG.slackChannelId,
-      thread_ts: messageTs
+      initial_comment: `*新着写真*\n*${escapeMrkdwn(file.getName())}*\nコメント: ${escapeMrkdwn(comment)}\n${new Date().toLocaleString("ja-JP")}`
     }),
     muteHttpExceptions: true,
   });
@@ -290,6 +228,64 @@ function postPhotoToSlackWithBlockKit(file, payload) {
 
   console.log("[postPhotoToSlackWithBlockKit] アップロード完了");
   paperLog("[postPhotoToSlackWithBlockKit] アップロード完了");
+
+  // ステップ4: ボタン付きメッセージを画像の直後に投稿
+  console.log("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
+  paperLog("[postPhotoToSlackWithBlockKit] ボタンメッセージ投稿開始");
+  
+  const blocks = [
+    {
+      type: "section",
+      text: {
+        type: "mrkdwn",
+        text: `────────────────────\n<${fileUrl}|📷 Driveで画像を開く>`
+      }
+    },
+    {
+      type: "actions",
+      block_id: "review_actions",
+      elements: [
+        {
+          type: "button",
+          text: { type: "plain_text", text: "OK → 公開へ" },
+          style: "primary",
+          action_id: "ok_move",
+          value: JSON.stringify({ fileId: file.getId(), name: file.getName() }),
+        },
+        {
+          type: "button",
+          text: { type: "plain_text", text: "NG（理由入力）" },
+          style: "danger",
+          action_id: "ng_reason",
+          value: JSON.stringify({ fileId: file.getId(), name: file.getName() }),
+        },
+      ],
+    }
+  ];
+
+  const buttonResp = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+    method: "post",
+    headers: { 
+      Authorization: "Bearer " + CONFIG.slackBotToken
+    },
+    contentType: "application/json",
+    payload: JSON.stringify({
+      channel: CONFIG.slackChannelId,
+      text: "審査ボタン",
+      blocks: blocks,
+    }),
+    muteHttpExceptions: true,
+  });
+
+  const buttonData = JSON.parse(buttonResp.getContentText() || "{}");
+  if (!buttonData.ok) {
+    console.error("[postPhotoToSlackWithBlockKit] ボタン投稿エラー", "error=" + buttonResp.getContentText());
+    paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿エラー", "error=" + buttonResp.getContentText());
+    return;
+  }
+
+  console.log("[postPhotoToSlackWithBlockKit] ボタン投稿完了", "ts=" + buttonData.ts);
+  paperLog("[postPhotoToSlackWithBlockKit] ボタン投稿完了");
 }
 
 function doGet(event) {
