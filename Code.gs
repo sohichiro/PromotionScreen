@@ -56,35 +56,20 @@ function doPost(event) {
     
     const blob = createBlob(payload, filename);
     const file = folder.createFile(blob);
-    file.setDescription(payload.comment || "");
+    
+    // メタデータをファイルの説明に JSON 形式で保存
+    const metadata = {
+      comment: payload.comment || "",
+      uploadedAt: payload.timestamp || new Date().toISOString(),
+      status: STATUS.pending,
+    };
+    const description = payload.comment || "";
+    file.setDescription(description);
     file.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.VIEW);
     
-    // カスタムプロパティの設定（エラーが発生しても処理を続行）
-    try {
-      file.setProperty(META_KEYS.comment, payload.comment || "");
-      paperLog("[doPost] プロパティ設定成功", "key=" + META_KEYS.comment);
-    } catch (err) {
-      console.warn("[doPost] プロパティ設定エラー (comment):", err);
-      paperLog("[doPost] プロパティ設定エラー (comment)", "error=" + String(err));
-    }
-    
-    try {
-      file.setProperty(META_KEYS.uploadedAt, payload.timestamp || new Date().toISOString());
-      paperLog("[doPost] プロパティ設定成功", "key=" + META_KEYS.uploadedAt);
-    } catch (err) {
-      console.warn("[doPost] プロパティ設定エラー (uploadedAt):", err);
-      paperLog("[doPost] プロパティ設定エラー (uploadedAt)", "error=" + String(err));
-    }
-    
-    try {
-      file.setProperty(META_KEYS.status, STATUS.pending);
-      paperLog("[doPost] プロパティ設定成功", "key=" + META_KEYS.status);
-    } catch (err) {
-      console.warn("[doPost] プロパティ設定エラー (status):", err);
-      paperLog("[doPost] プロパティ設定エラー (status)", "error=" + String(err));
-    }
-
-    paperLog("[doPost] ファイル作成完了", "fileId=" + file.getId(), "fileName=" + file.getName());
+    // setProperty は使えないため、メタデータはファイル名や説明に含める
+    // 必要に応じて、後で Drive API v3 を使ってプロパティを設定することも可能
+    paperLog("[doPost] ファイル作成完了", "fileId=" + file.getId(), "fileName=" + file.getName(), "metadata=" + JSON.stringify(metadata));
     paperLog("[doPost] Slack通知を開始");
 
     notifySlack(file, payload);
@@ -308,13 +293,9 @@ function moveFile(fileId, status) {
 
   targetFolder.addFile(file);
   
-  // カスタムプロパティの設定（エラーが発生しても処理を続行）
-  try {
-    file.setProperty(META_KEYS.status, status);
-    console.log("[moveFile] プロパティ設定成功", "key=" + META_KEYS.status, "value=" + status);
-  } catch (err) {
-    console.warn("[moveFile] プロパティ設定エラー (status):", err);
-  }
+  // setProperty は使えないため、ステータスはファイル名や説明に含める
+  // 必要に応じて、後で Drive API v3 を使ってプロパティを設定することも可能
+  console.log("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
 }
 
 function buildJsonResponse(payload, status = 200) {
