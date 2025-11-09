@@ -162,14 +162,13 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   const urlResp = UrlFetchApp.fetch("https://slack.com/api/files.getUploadURLExternal", {
     method: "post",
     headers: {
-      "Authorization": "Bearer " + CONFIG.slackBotToken,
-      "Content-Type": "application/json"
+      "Authorization": "Bearer " + CONFIG.slackBotToken
     },
+    contentType: "application/json",
     payload: JSON.stringify({
       "filename": file.getName(),
       "length": fileSize
     }),
-    contentType: "application/json",
     muteHttpExceptions: true,
   });
 
@@ -210,9 +209,9 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   const completeResp = UrlFetchApp.fetch("https://slack.com/api/files.completeUploadExternal", {
     method: "post",
     headers: {
-      "Authorization": "Bearer " + CONFIG.slackBotToken,
-      "Content-Type": "application/json; charset=utf-8"
+      "Authorization": "Bearer " + CONFIG.slackBotToken
     },
+    contentType: "application/json",
     payload: JSON.stringify({
       files: [{
         id: urlData.file_id,
@@ -261,9 +260,9 @@ function postPhotoToSlackWithBlockKit(file, payload) {
   const buttonResp = UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
     method: "post",
     headers: { 
-      Authorization: "Bearer " + CONFIG.slackBotToken,
-      "Content-Type": "application/json; charset=utf-8"
+      Authorization: "Bearer " + CONFIG.slackBotToken
     },
+    contentType: "application/json",
     payload: JSON.stringify({
       channel: CONFIG.slackChannelId,
       text: "審査ボタン",
