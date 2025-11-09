@@ -268,21 +268,39 @@ function doOptions() {
 }
 
 function moveFile(fileId, status) {
-  const file = DriveApp.getFileById(fileId);
-  const currentParents = file.getParents();
-  const targetFolderId = status === STATUS.approved ? CONFIG.okFolderId : CONFIG.ngFolderId;
-  const targetFolder = DriveApp.getFolderById(targetFolderId);
-
-  while (currentParents.hasNext()) {
-    const parent = currentParents.next();
-    parent.removeFile(file);
-  }
-
-  targetFolder.addFile(file);
+  console.log("[moveFile] 開始", "fileId=" + fileId, "status=" + status);
+  paperLog("[moveFile] 開始", "fileId=" + fileId, "status=" + status);
   
-  // setProperty は使えないため、ステータスはファイル名や説明に含める
-  // 必要に応じて、後で Drive API v3 を使ってプロパティを設定することも可能
-  console.log("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
+  try {
+    const file = DriveApp.getFileById(fileId);
+    console.log("[moveFile] ファイル取得成功", "fileName=" + file.getName());
+    paperLog("[moveFile] ファイル取得成功", "fileName=" + file.getName());
+    
+    const currentParents = file.getParents();
+    const targetFolderId = status === STATUS.approved ? CONFIG.okFolderId : CONFIG.ngFolderId;
+    console.log("[moveFile] ターゲットフォルダID", "targetFolderId=" + targetFolderId);
+    paperLog("[moveFile] ターゲットフォルダID", "targetFolderId=" + targetFolderId);
+    
+    const targetFolder = DriveApp.getFolderById(targetFolderId);
+    console.log("[moveFile] ターゲットフォルダ取得成功", "folderName=" + targetFolder.getName());
+    paperLog("[moveFile] ターゲットフォルダ取得成功", "folderName=" + targetFolder.getName());
+
+    // 現在の親フォルダからファイルを削除
+    while (currentParents.hasNext()) {
+      const parent = currentParents.next();
+      console.log("[moveFile] 親フォルダから削除", "parentId=" + parent.getId());
+      parent.removeFile(file);
+    }
+
+    // ターゲットフォルダにファイルを追加
+    targetFolder.addFile(file);
+    console.log("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
+    paperLog("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
+  } catch (err) {
+    console.error("[moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    paperLog("[moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    throw err;
+  }
 }
 
 function buildJsonResponse(payload, status = 200) {
@@ -340,6 +358,9 @@ function handleSlackInteractivity(event) {
       const val = JSON.parse(action.value);
 
       if (action.action_id === "ok_move") {
+        console.log("[handleSlackInteractivity] OK処理開始", "fileId=" + val.fileId, "fileName=" + val.name);
+        paperLog("[handleSlackInteractivity] OK処理開始", "fileId=" + val.fileId, "fileName=" + val.name);
+        
         try {
           // 処理開始を即時表示
           replaceOriginalViaResponseUrl(
@@ -350,6 +371,7 @@ function handleSlackInteractivity(event) {
           );
 
           // ファイルを OK フォルダへ移動
+          console.log("[handleSlackInteractivity] moveFile呼び出し", "fileId=" + val.fileId);
           moveFile(val.fileId, STATUS.approved);
 
           // 完了メッセージ + ボタン無効化
@@ -359,7 +381,13 @@ function handleSlackInteractivity(event) {
             `✅ 承認済み by <@${userId}> → OKフォルダへ移動しました`,
             true
           );
+          
+          console.log("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
+          paperLog("[handleSlackInteractivity] OK処理完了", "fileId=" + val.fileId);
         } catch (err) {
+          console.error("[handleSlackInteractivity] OK処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+          paperLog("[handleSlackInteractivity] OK処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+          
           replaceOriginalViaResponseUrl(
             payload.response_url,
             payload.message.blocks,
@@ -396,10 +424,14 @@ function handleSlackInteractivity(event) {
       const userId = payload.user?.id || "unknown";
 
       try {
+        console.log("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
+        paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
+        
         // 処理開始を即時表示
         replaceOriginalViaResponseUrl(meta.responseUrl, meta.blocks, `⏳ NG処理開始 by <@${userId}>`, false);
 
         // ファイルを NG フォルダへ移動
+        console.log("[handleSlackInteractivity] moveFile呼び出し (NG)", "fileId=" + meta.fileId);
         moveFile(meta.fileId, STATUS.rejected);
 
         // 完了メッセージ + ボタン無効化
@@ -409,7 +441,13 @@ function handleSlackInteractivity(event) {
           `🛑 非承認（<@${userId}>：${escapeMrkdwn(reason)}） → NGフォルダへ移動しました`,
           true
         );
+        
+        console.log("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
+        paperLog("[handleSlackInteractivity] NG処理完了", "fileId=" + meta.fileId);
       } catch (err) {
+        console.error("[handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+        paperLog("[handleSlackInteractivity] NG処理エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+        
         replaceOriginalViaResponseUrl(
           meta.responseUrl,
           meta.blocks,
