@@ -2,7 +2,6 @@ const CONFIG = {
   inboxFolderId: "1ADisWsmPc81lqlV7-NWAK4WIeN9K_TGZ",
   okFolderId: "12CurPdxu1BlWC0k_9FTdOuYcTgCNO3_R",
   ngFolderId: "1sErg8MjdKFuxVzAmJ5BTkBIykohCl4E3",
-  slackWebhookUrl: "https://hooks.slack.com/services/XXXX/XXXX/XXXX",
   slackBotToken: PropertiesService.getScriptProperties().getProperty("SLACK_BOT_TOKEN") || "",
   slackSigningSecret: PropertiesService.getScriptProperties().getProperty("SLACK_SIGNING_SECRET") || "",
   slackChannelId: PropertiesService.getScriptProperties().getProperty("SLACK_CHANNEL_ID") || "",
@@ -10,7 +9,7 @@ const CONFIG = {
 
 // ===== サイネージ設定（表示用） =====
 const SIGNAGE_CONFIG = {
-  FOLDER_ID: '13BiDOSJ4mGU5UnBIU6JxqU-ECOu7jfbE', // ok等、表示対象フォルダのIDに変更可
+  FOLDER_ID: '12CurPdxu1BlWC0k_9FTdOuYcTgCNO3_R', // ok等、表示対象フォルダのIDに変更可
   EXPIRES_MS: 24 * 60 * 60 * 1000,
   ALLOW_ORIGIN: '*',
 };
@@ -136,35 +135,8 @@ function notifySlack(file, payload) {
     return;
   }
 
-  // フォールバック: Webhook URL を使用
-  paperLog("[notifySlack] Webhook URL 形式で投稿を試みます", "webhookUrl=" + (CONFIG.slackWebhookUrl || "未設定"));
-  if (!CONFIG.slackWebhookUrl || CONFIG.slackWebhookUrl.includes("hooks.slack.com/services/XXXX")) {
-    paperLog("[notifySlack] Webhook URL が未設定またはプレースホルダーのため、投稿をスキップします");
-    return;
-  }
-
-  const okUrl = buildReviewUrl(file, STATUS.approved);
-  const ngUrl = buildReviewUrl(file, STATUS.rejected);
-  const fileUrl = `https://drive.google.com/open?id=${file.getId()}`;
-
-  const message = {
-    text: [
-      ":sparkles: 新しい写真がアップロードされました。",
-      `ファイル名: ${file.getName()}`,
-      `コメント: ${payload.comment || "（なし）"}`,
-      `<${fileUrl}|画像を開く>`,
-      `<${okUrl}|OK フォルダへ移動> ｜ <${ngUrl}|NG フォルダへ移動>`,
-    ].join("\n"),
-  };
-
-  const options = {
-    method: "post",
-    contentType: "application/json",
-    payload: JSON.stringify(message),
-    muteHttpExceptions: true,
-  };
-
-  UrlFetchApp.fetch(CONFIG.slackWebhookUrl, options);
+  // Bot Token が未設定の場合はスキップ
+  paperLog("[notifySlack] Bot Token が未設定のため、Slack通知をスキップします");
 }
 
 function postPhotoToSlackWithBlockKit(file, payload) {
@@ -235,13 +207,6 @@ function postPhotoToSlackWithBlockKit(file, payload) {
     console.log("[postPhotoToSlackWithBlockKit] 成功", "ts=" + (data.ts || "なし"), "channel=" + (data.channel || "なし"));
     paperLog("[postPhotoToSlackWithBlockKit] 成功", "ts=" + (data.ts || "なし"), "channel=" + (data.channel || "なし"));
   }
-}
-
-function buildReviewUrl(file, status) {
-  const action = status === STATUS.approved ? "moveToOk" : "moveToNg";
-  const baseUrl = ScriptApp.getService().getUrl();
-  const params = `?action=${action}&fileId=${encodeURIComponent(file.getId())}`;
-  return `${baseUrl}${params}`;
 }
 
 function doGet(event) {
