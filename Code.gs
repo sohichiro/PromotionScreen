@@ -423,18 +423,24 @@ function moveFile(fileId, status, reason, includeReasonInEmail) {
     let email = "";
     try {
       const description = file.getDescription();
+      paperLog("[moveFile] ファイル説明取得", "hasDescription=" + !!description, "descriptionLength=" + (description?.length || 0));
       if (description) {
         // JSON形式で保存されている場合
         try {
           const metadata = JSON.parse(description);
           email = metadata.email || "";
+          const maskedEmail = email ? (email.indexOf("@") > 0 ? email.substring(0, email.indexOf("@")) + "@***" : email.substring(0, 3) + "***") : "なし";
+          paperLog("[moveFile] メールアドレス取得", "email=" + maskedEmail, "hasEmail=" + !!email);
         } catch (e) {
           // JSON形式でない場合はコメントのみなのでメールアドレスなし
           email = "";
+          paperLog("[moveFile] 説明はJSON形式ではない（コメントのみ）", "email=" + email);
         }
+      } else {
+        paperLog("[moveFile] ファイル説明が空", "email=" + email);
       }
     } catch (e) {
-      paperLog("[moveFile] メールアドレス取得エラー（無視）", "error=" + String(e));
+      paperLog("[ERROR] [moveFile] メールアドレス取得エラー", "error=" + String(e), "email=" + email);
     }
     
     const currentParents = file.getParents();
@@ -459,7 +465,11 @@ function moveFile(fileId, status, reason, includeReasonInEmail) {
     // NGの場合、includeReasonInEmailがfalseの場合は理由を含めない
     if (email) {
       const emailReason = (status === STATUS.rejected && !includeReasonInEmail) ? "" : (reason || "");
+      const maskedEmailForLog = email.indexOf("@") > 0 ? email.substring(0, email.indexOf("@")) + "@***" : email.substring(0, 3) + "***";
+      paperLog("[moveFile] メール送信を開始", "email=" + maskedEmailForLog, "status=" + status, "hasReason=" + !!emailReason, "includeReasonInEmail=" + includeReasonInEmail, "reasonLength=" + (emailReason?.length || 0));
       sendReviewResultEmail(email, file.getName(), status, emailReason);
+    } else {
+      paperLog("[moveFile] メールアドレスなしのためメール送信スキップ", "fileId=" + fileId);
     }
   } catch (err) {
     paperLog("[ERROR] [moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
@@ -468,8 +478,16 @@ function moveFile(fileId, status, reason, includeReasonInEmail) {
 }
 
 function sendReviewResultEmail(email, fileName, status, reason) {
+  // メールアドレスのマスキング用ヘルパー
+  const maskEmail = (addr) => {
+    if (!addr) return "なし";
+    const atIndex = addr.indexOf("@");
+    return atIndex > 0 ? addr.substring(0, atIndex) + "@***" : addr.substring(0, Math.min(3, addr.length)) + "***";
+  };
+  const maskedEmail = maskEmail(email);
+  
   try {
-    paperLog("[sendReviewResultEmail] 開始", "email=" + email, "fileName=" + fileName, "status=" + status);
+    paperLog("[sendReviewResultEmail] 開始", "email=" + maskedEmail, "fileName=" + fileName, "status=" + status, "hasReason=" + !!reason, "reasonLength=" + (reason?.length || 0));
     
     const subject = status === STATUS.approved 
       ? "【審査結果】画像が承認されました"
@@ -496,15 +514,17 @@ function sendReviewResultEmail(email, fileName, status, reason) {
 ご理解のほどよろしくお願いいたします。`;
     }
     
+    paperLog("[sendReviewResultEmail] メール送信準備完了", "to=" + maskedEmail, "subject=" + subject, "bodyLength=" + body.length, "hasReasonInBody=" + body.includes("【理由】"));
+    
     MailApp.sendEmail({
       to: email,
       subject: subject,
       body: body
     });
     
-    paperLog("[sendReviewResultEmail] メール送信完了", "email=" + email);
+    paperLog("[sendReviewResultEmail] メール送信成功", "email=" + maskedEmail, "subject=" + subject);
   } catch (err) {
-    paperLog("[ERROR] [sendReviewResultEmail] メール送信エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
+    paperLog("[ERROR] [sendReviewResultEmail] メール送信エラー", "email=" + maskedEmail, "error=" + String(err), "errorName=" + (err.name || "なし"), "errorMessage=" + (err.message || "なし"), "stack=" + (err.stack || "なし"));
     // メール送信エラーは処理を続行する（ファイル移動は成功しているため）
   }
 }
