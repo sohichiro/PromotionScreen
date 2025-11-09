@@ -1,29 +1,31 @@
 # PromotionScreen
 
-サイネージ表示（iPhone Safari想定）と、写真アップロード/審査（OK/NG）を行うワークフローを、GitHub Pages + Google Apps Script(GAS) + Google Drive + Slack で構築したプロジェクトです。
+サイネージ表示（iPhone Safari想定）と、画像アップロード/審査（OK/NG）を行うワークフローを、GitHub Pages + Google Apps Script(GAS) + Google Drive + Slack で構築したプロジェクトです。
 
-- フロントエンド: GitHub Pages（`public/index.html`）
+- フロントエンド: GitHub Pages（`public/index.html`, `public/upload.html`）
 - バックエンド: Google Apps Script（`Code.gs`）
-- 設定: GAS 側は `Config.gs`（Script Properties から値を取得）、フロント側は `public/assets/js/config.js`
+- 設定: GAS 側は `Code.gs` の先頭で定義（Script Properties から値を取得）、フロント側は `public/assets/js/config.js`
 - 画像保管: Google Drive（INBOX/OK/NG フォルダ）
 - 審査通知/操作: Slack（画像投稿 + OK/NG ボタン、NG理由モーダル、監査ログ）
+- メール通知: 審査結果を投稿者にメール送信（メールアドレスが登録されている場合）
 
 ## 構成
 
 ```
 PromotionScreen/
-  ├─ Config.gs                 # GAS 設定（Script Properties から取得/検証）
-  ├─ Code.gs                   # GAS 本体（アップロード/審査API、Slack連携、サイネージAPI）
+  ├─ Code.gs                   # GAS 本体（設定定義、アップロード/審査API、Slack連携、サイネージAPI、メール送信）
   ├─ appsscript.json           # GAS マニフェスト
   ├─ public/
   │   ├─ index.html            # サイネージ表示ページ
-  │   ├─ upload.html           # 写真アップロードページ
+  │   ├─ upload.html           # 画像アップロードページ
   │   └─ assets/
   │       ├─ js/
   │       │   ├─ config.js     # フロント用設定（GAS URL など）
-  │       │   └─ main.js       # （必要に応じて使用）
+  │       │   └─ main.js       # アップロードフォーム処理
   │       ├─ css/style.css
-  │       └─ img/logo.svg
+  │       └─ img/
+  │           ├─ logo.svg
+  │           └─ upload-icon.svg
   ├─ index.html                # GitHub Pages ルート用リダイレクト
   └─ upload.html               # GitHub Pages ルート用リダイレクト
 ```
@@ -46,14 +48,14 @@ PromotionScreen/
 - 通知先のチャンネルID（`SLACK_CHANNEL_ID`）を控える
 
 ### 3) GAS（Google Apps Script）
-- このプロジェクトの `Code.gs` と `Config.gs` を使って Web アプリを作成
+- このプロジェクトの `Code.gs` を使って Web アプリを作成
 - デプロイ → 新しいデプロイ → 種類: Web アプリ
 - 誰にアクセスを許可するかは要件に合わせて設定（一般公開でサイネージを使う場合は匿名アクセスを想定）
 - デプロイ後の URL を控えます（サイネージ用 API のベースURL）
 
 ## 設定
 
-### GAS 側: Script Properties（Config.gs で参照）
+### GAS 側: Script Properties（Code.gs の先頭で定義・参照）
 - 必須
   - `INBOX_FOLDER_ID`: INBOX フォルダID
   - `OK_FOLDER_ID`: OK フォルダID
@@ -69,7 +71,7 @@ PromotionScreen/
   - `DEBUG_SHEET_ID`: デバッグログ用スプレッドシートID
   - `DEBUG_MODE`: `true` のとき、紙ログ（`paperLog`）をスプレッドシートにも出力
 
-Config.gs には検証関数 `validateConfig()` も用意しています。必要に応じて呼び出して不足設定を検知できます。
+Code.gs には検証関数 `validateConfig()` も用意しています。必要に応じて呼び出して不足設定を検知できます。
 
 ### フロント側: `public/assets/js/config.js`
 - `API_BASE`: GAS Web アプリの実行URL（例: `https://script.google.com/macros/s/xxx/exec`）
@@ -87,14 +89,25 @@ Config.gs には検証関数 `validateConfig()` も用意しています。必�
   - `mimeType`: 画像のMIMEタイプ（例: `image/jpeg`）
   - `filename`: 元ファイル名
   - `timestamp`: ISO8601 文字列（任意）
-  - `comment`: 任意コメント
+  - `comment`: 審査者へのメッセージ（任意）
+  - `email`: メールアドレス（任意、審査結果の通知先）
 - 動作
-  - INBOX へ保存 → Slack に画像 + ボタン投稿
+  - INBOX へ保存（メールアドレスがある場合はメタデータに保存） → Slack に画像 + ボタン投稿
 
 ### 審査（Slack）
 - 画像投稿後、ボタン投稿（OK/NG）
-- OK: Drive の OK フォルダへ移動、スレッド/メッセージ更新、監査ログ
-- NG: モーダルで理由入力 → Drive の NG フォルダへ移動、スレッド/メッセージ更新、監査ログ
+- OK: Drive の OK フォルダへ移動、スレッド/メッセージ更新、監査ログ、メール送信（メールアドレスがある場合）
+- NG: モーダルで理由入力 → Drive の NG フォルダへ移動、スレッド/メッセージ更新、監査ログ、メール送信（メールアドレスがある場合）
+  - NG理由をメールに含めるかどうかをチェックボックスで選択可能（デフォルト: 含めない）
+  - チェックがついていない場合、NG理由は監査ログにのみ記録され、メールには含まれない
+
+### メール通知
+- アップロード時にメールアドレスが登録されている場合、審査結果（OK/NG）を自動的にメール送信
+- OKの場合: 承認通知メールを送信
+- NGの場合: 非承認通知メールを送信
+  - NG理由をメールに含めるかどうかは、SlackのNG処理時にチェックボックスで選択可能
+  - チェックがついていない場合、NG理由は監査ログにのみ記録され、メールには含まれない
+- メール送信の詳細ログは `paperLog` で記録される
 
 ### サイネージ API（GET）
 - `?fn=list`: 表示候補の一覧（新しい順）、各アイテムに期限付き署名URL（`img64`用）を付与

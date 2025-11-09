@@ -316,6 +316,7 @@
     let loopHandle = null;
     let inFlight = false;   // 遷移の同時実行防止
     let lastSwapAt = 0;     // 最後に画像が画面に出た時刻（ms）
+    let currentIndex = 0;   // 現在表示中のインデックス（アップロード順）
 
     // === UI 表示/非表示トグル ===
     let statusVisible = false; // 初期状態: 非表示
@@ -462,6 +463,9 @@
           return { ...it, url: u.toString() };
         });
 
+        // リストが更新されたらインデックスをリセット（新しい順で並んでいるので最初から表示）
+        currentIndex = 0;
+
         badgeCount.textContent = `${items.length} photos`;
         badgeUpdated.textContent = `Updated ${fmtTime(json.now)}`;
 
@@ -478,23 +482,13 @@
       }
     }
 
-    // 新しさ優遇の重み抽選：重み = exp(-(経過時間)/tau)
-    function pickNextWeighted() {
+    // アップロード順に順番に選択（シンプルな順次表示）
+    function pickNext() {
       if (!items.length) return null;
-      const now = Date.now();
-      const tau = HALF_LIFE_HOURS * 3600 * 1000 / Math.log(2); // 半減期→時定数
-      const pool = items.slice(0, Math.min(items.length, SHUFFLE_BATCH)); // 先頭は新しい順
-      const weights = pool.map(it => {
-        const age = Math.max(0, now - new Date(it.updatedAt).getTime());
-        return Math.exp(-age / tau);
-      });
-      const sum = weights.reduce((a, b) => a + b, 0);
-      let r = Math.random() * sum;
-      for (let i = 0; i < pool.length; i++) {
-        r -= weights[i];
-        if (r <= 0) return pool[i];
-      }
-      return pool[pool.length - 1];
+      const item = items[currentIndex];
+      // 次のインデックスに進む（最後まで行ったら最初に戻る）
+      currentIndex = (currentIndex + 1) % items.length;
+      return item;
     }
 
     async function preload(url) {
@@ -540,7 +534,7 @@
       if (inFlight) return;       // ★ 二重起動ガード
       inFlight = true;
       try {
-        const it = pickNextWeighted();
+        const it = pickNext();
         if (!it) { return; }
 
         // どのURLで落ちてるか一緒に表示
