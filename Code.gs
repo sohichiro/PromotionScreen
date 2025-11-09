@@ -323,8 +323,13 @@ function doOptions() {
   return buildCorsResponse();
 }
 
-function moveFile(fileId, status, reason) {
-  paperLog("[moveFile] 開始", "fileId=" + fileId, "status=" + status);
+function moveFile(fileId, status, reason, includeReasonInEmail) {
+  // includeReasonInEmailが未指定の場合はtrue（後方互換性のため）
+  if (includeReasonInEmail === undefined) {
+    includeReasonInEmail = true;
+  }
+  
+  paperLog("[moveFile] 開始", "fileId=" + fileId, "status=" + status, "includeReasonInEmail=" + includeReasonInEmail);
   
   try {
     const file = DriveApp.getFileById(fileId);
@@ -366,9 +371,11 @@ function moveFile(fileId, status, reason) {
     targetFolder.addFile(file);
     paperLog("[moveFile] ファイル移動完了", "fileId=" + fileId, "status=" + status);
     
-    // メールアドレスがある場合は審査結果をメール送信
+    // メールアドレスがある場合は常に審査結果をメール送信
+    // NGの場合、includeReasonInEmailがfalseの場合は理由を含めない
     if (email) {
-      sendReviewResultEmail(email, file.getName(), status, reason || "");
+      const emailReason = (status === STATUS.rejected && !includeReasonInEmail) ? "" : (reason || "");
+      sendReviewResultEmail(email, file.getName(), status, emailReason);
     }
   } catch (err) {
     paperLog("[ERROR] [moveFile] エラー", "error=" + String(err), "stack=" + (err.stack || "なし"));
@@ -707,6 +714,27 @@ function handleSlackInteractivity(event) {
                   multiline: true,
                   placeholder: { type: "plain_text", text: "詳細やメモを入力" }
                 }
+              },
+              {
+                type: "section",
+                block_id: "email_notify_block",
+                text: {
+                  type: "mrkdwn",
+                  text: "NG理由をメールに含める場合はチェックしてください。"
+                },
+                accessory: {
+                  type: "checkboxes",
+                  action_id: "email_notify",
+                  options: [
+                    {
+                      text: {
+                        type: "plain_text",
+                        text: "NG理由をメールに含める"
+                      },
+                      value: "include_reason"
+                    }
+                  ]
+                }
               }
             ]
           };
@@ -755,12 +783,14 @@ function handleSlackInteractivity(event) {
       const reasonText = st.reason_block2?.reason_text?.value || "";
       const reason = [reasonSel, reasonText].filter(Boolean).join(" / ") || "（未記入）";
       const userId = payload.user?.id || "unknown";
+      
+      // メールに理由を含めるかのチェック状態を取得
+      const includeReasonInEmail = st.email_notify_block?.email_notify?.selected_options?.length > 0;
+      paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason, "includeReasonInEmail=" + includeReasonInEmail);
 
       try {
-        paperLog("[handleSlackInteractivity] NG処理開始", "fileId=" + meta.fileId, "reason=" + reason);
-
-        // ファイルを NG フォルダへ移動
-        moveFile(meta.fileId, STATUS.rejected, reason);
+        // ファイルを NG フォルダへ移動（チェックがついていれば理由をメールに含める）
+        moveFile(meta.fileId, STATUS.rejected, reason, includeReasonInEmail);
 
         // 監査ログを記録
         logAudit("NG", meta.fileId, meta.name, userId, reason, meta.channel, meta.ts);
