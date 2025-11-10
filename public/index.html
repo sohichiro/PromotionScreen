@@ -333,6 +333,7 @@
     let inFlight = false;   // 遷移の同時実行防止
     let lastSwapAt = 0;     // 最後に画像が画面に出た時刻（ms）
     let currentIndex = 0;   // 現在表示中のインデックス（アップロード順）
+    let displayedSet = new Set(); // 1周目で表示済みの画像IDを追跡
 
     // === UI 表示/非表示トグル ===
     let statusVisible = false; // 初期状態: 非表示
@@ -479,8 +480,9 @@
           return { ...it, url: u.toString() };
         });
 
-        // リストが更新されたらインデックスをリセット（新しい順で並んでいるので最初から表示）
+        // リストが更新されたらインデックスと表示済みセットをリセット（新しい順で並んでいるので最初から表示）
         currentIndex = 0;
+        displayedSet.clear();
 
         badgeCount.textContent = `${items.length} photos`;
         badgeUpdated.textContent = `Updated ${fmtTime(json.now)}`;
@@ -498,12 +500,35 @@
       }
     }
 
-    // アップロード順に順番に選択（シンプルな順次表示）
+    // アップロード順に順番に選択（全ての画像を1回表示してから次の周回に入る）
     function pickNext() {
       if (!items.length) return null;
+      
+      // 現在の周回で全ての画像が表示されたら、次の周回に入る
+      if (displayedSet.size >= items.length) {
+        displayedSet.clear();
+        currentIndex = 0; // 次の周回は最初から
+      }
+      
+      // 現在の周回でまだ表示していない画像を順番に表示
+      // currentIndexから順番に、まだ表示していない画像を探す
+      for (let i = 0; i < items.length; i++) {
+        const idx = (currentIndex + i) % items.length;
+        const item = items[idx];
+        if (!displayedSet.has(item.id)) {
+          // 表示済みセットに追加
+          displayedSet.add(item.id);
+          currentIndex = (idx + 1) % items.length;
+          return item;
+        }
+      }
+      
+      // 全て表示済みの場合は次の周回に入る（通常は到達しない）
+      displayedSet.clear();
+      currentIndex = 0;
       const item = items[currentIndex];
-      // 次のインデックスに進む（最後まで行ったら最初に戻る）
-      currentIndex = (currentIndex + 1) % items.length;
+      displayedSet.add(item.id);
+      currentIndex = 1;
       return item;
     }
 
