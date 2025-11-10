@@ -332,6 +332,8 @@
     let lastSwapAt = 0;     // 最後に画像が画面に出た時刻（ms）
     let currentDisplayingId = null; // 現在表示中の画像ID
     let previousItemIds = new Set(); // 前回の画像IDセット（削除検出用）
+    let cycleQueue = []; // 1巡するまでの表示順キュー
+    let itemMap = new Map(); // id -> item
 
     const statsById = new Map(); // { lastShownAt, timesShown }
     const recentQueue = [];      // 直近に表示したIDのキュー
@@ -505,8 +507,8 @@
       return { weight, ageMs, idleMs };
     }
 
-    function buildCandidatePool(now) {
-      const scored = items.map(item => {
+    function buildCandidatePool(now, sourceItems = items) {
+      const scored = sourceItems.map(item => {
         const metrics = computeWeight(item, now);
         return { item, ...metrics };
       });
@@ -535,6 +537,28 @@
         recentSet.add(itemId);
       }
       trimRecentQueue();
+    }
+
+    function rebuildCycleQueue(reason) {
+      cycleQueue = [];
+      if (!items.length) return;
+      const now = Date.now();
+      const remaining = items.slice();
+      while (remaining.length) {
+        const pool = buildCandidatePool(now, remaining);
+        if (!pool.length) break;
+        const cooled = pool.filter(entry => !recentSet.has(entry.item.id));
+        const finalPool = cooled.length ? cooled : pool;
+        const choice = weightedPick(finalPool);
+        if (!choice) break;
+        cycleQueue.push(choice.item.id);
+        const idx = remaining.findIndex(it => it.id === choice.item.id);
+        if (idx >= 0) remaining.splice(idx, 1);
+      }
+      if (!cycleQueue.length) {
+        cycleQueue = items.map(it => it.id);
+      }
+      console.log(`[cycle] queue rebuilt (${cycleQueue.length}枚)${reason ? ` reason=${reason}` : ''}`);
     }
 
     async function fetchList() {
@@ -586,6 +610,7 @@
 
         items = newItems;
         previousItemIds = newItemIds;
+        itemMap = new Map(items.map(it => [it.id, it]));
         syncStatsWithItems(items);
 
         if (addedIds.length) {
@@ -593,6 +618,12 @@
         }
         if (removedIds.length) {
           console.log('[fetchList] 削除画像', removedIds.length, '件');
+        }
+
+        if (addedIds.length || removedIds.length) {
+          rebuildCycleQueue('list changed');
+        } else if (!cycleQueue.length) {
+          rebuildCycleQueue('initial load');
         }
 
         badgeCount.textContent = `${items.length} photos`;
@@ -625,13 +656,15 @@
     function pickNext() {
       if (!items.length) return null;
       const now = Date.now();
-      const pool = buildCandidatePool(now);
-      if (!pool.length) return null;
-
-      const cooledPool = pool.filter(entry => !recentSet.has(entry.item.id));
-      const finalPool = cooledPool.length ? cooledPool : pool;
-      const chosen = weightedPick(finalPool);
-      return chosen ? chosen.item : null;
+        if (!cycleQueue.length) {
+          rebuildCycleQueue('cycle consumed');
+        }
+        while (cycleQueue.length) {
+          const candidateId = cycleQueue.shift();
+          const item = itemMap.get(candidateId);
+          if (item) return item;
+        }
+        return null;
     }
 
     async function preload(url) {
