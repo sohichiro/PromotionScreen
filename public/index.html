@@ -333,7 +333,11 @@
     let inFlight = false;   // 遷移の同時実行防止
     let lastSwapAt = 0;     // 最後に画像が画面に出た時刻（ms）
     let currentIndex = 0;   // 現在表示中のインデックス（アップロード順）
-    let displayedSet = new Set(); // 1周目で表示済みの画像IDを追跡
+    let displayedSet = new Set(); // 現在の周回で表示済みの画像IDを追跡
+    let previousItemsCount = 0; // 前回の画像数（再読み込み判定用）
+    let pendingListUpdate = null; // 現在の周回完了後に適用するリスト更新
+    let currentDisplayingId = null; // 現在表示中の画像ID
+    let previousItemIds = new Set(); // 前回の画像IDセット（削除検出用）
 
     // === UI 表示/非表示トグル ===
     let statusVisible = false; // 初期状態: 非表示
@@ -474,15 +478,87 @@
         }
 
         // 旧URLなら img64 に差し替え（既に入れてる場合はそのままでOK）
-        items = (json.items || []).map(it => {
+        const newItems = (json.items || []).map(it => {
           const u = new URL(it.url, location.href);
           if (u.searchParams.get('fn') === 'image') u.searchParams.set('fn', 'img64');
           return { ...it, url: u.toString() };
         });
 
-        // リストが更新されたらインデックスと表示済みセットをリセット（新しい順で並んでいるので最初から表示）
-        currentIndex = 0;
-        displayedSet.clear();
+        const newItemsCount = newItems.length;
+        const itemsCountChanged = newItemsCount !== previousItemsCount;
+        const newItemIds = new Set(newItems.map(it => it.id));
+
+        // 画像の数が変わった場合、または現在の周回が完了している場合のみ更新
+        if (itemsCountChanged) {
+          // 現在の周回が完了していない場合は、完了後に更新するように予約
+          if (displayedSet.size < items.length && items.length > 0) {
+            pendingListUpdate = {
+              items: newItems,
+              count: newItemsCount,
+              updated: json.now,
+              itemIds: newItemIds
+            };
+            console.log('[fetchList] 現在の周回完了後にリストを更新します', '現在の表示済み=' + displayedSet.size + '/' + items.length);
+            return;
+          }
+        }
+
+        // リストを更新
+        items = newItems;
+        previousItemsCount = newItemsCount;
+        previousItemIds = newItemIds;
+
+        if (itemsCountChanged) {
+          // 画像数が増えた場合
+          if (newItemsCount > previousItemsCount) {
+            // 現在の表示状態を維持し、新しい画像は次のターンから表示
+            // displayedSetとcurrentIndexはそのまま維持
+            console.log('[fetchList] 画像数が増加', '前回=' + previousItemsCount + '→今回=' + newItemsCount, '表示済みセットは維持');
+          } 
+          // 画像数が減った場合
+          else if (newItemsCount < previousItemsCount) {
+            // 削除された画像IDを特定
+            const deletedIds = [];
+            previousItemIds.forEach(id => {
+              if (!newItemIds.has(id)) {
+                deletedIds.push(id);
+              }
+            });
+            
+            // 削除された画像が表示済みセットに含まれている場合は削除
+            deletedIds.forEach(id => {
+              if (displayedSet.has(id)) {
+                displayedSet.delete(id);
+              }
+            });
+            
+            // 現在表示中の画像が削除された場合、次の画像に切り替える
+            if (currentDisplayingId && deletedIds.includes(currentDisplayingId)) {
+              console.log('[fetchList] 現在表示中の画像が削除されました。次の画像に切り替えます');
+              // 次の画像を即座に表示
+              setTimeout(() => {
+                if (running && !inFlight) {
+                  showNext();
+                }
+              }, 100);
+            }
+            
+            console.log('[fetchList] 画像数が減少', '前回=' + previousItemsCount + '→今回=' + newItemsCount, '削除されたID数=' + deletedIds.length);
+          }
+        } else {
+          // 画像数が変わっていない場合、表示済みセットから存在しないIDを削除
+          // （通常は発生しないが、念のため）
+          const idsToRemove = [];
+          displayedSet.forEach(id => {
+            if (!newItemIds.has(id)) {
+              idsToRemove.push(id);
+            }
+          });
+          idsToRemove.forEach(id => displayedSet.delete(id));
+          if (idsToRemove.length > 0) {
+            console.log('[fetchList] 画像数は変化なし、存在しないIDを削除', '削除数=' + idsToRemove.length);
+          }
+        }
 
         badgeCount.textContent = `${items.length} photos`;
         badgeUpdated.textContent = `Updated ${fmtTime(json.now)}`;
@@ -506,8 +582,46 @@
       
       // 現在の周回で全ての画像が表示されたら、次の周回に入る
       if (displayedSet.size >= items.length) {
-        displayedSet.clear();
-        currentIndex = 0; // 次の周回は最初から
+        // 予約されているリスト更新があれば適用
+        if (pendingListUpdate) {
+          console.log('[pickNext] 周回完了、予約されたリスト更新を適用');
+          const oldItemsCount = items.length;
+          items = pendingListUpdate.items;
+          previousItemsCount = pendingListUpdate.count;
+          previousItemIds = pendingListUpdate.itemIds;
+          badgeCount.textContent = `${items.length} photos`;
+          badgeUpdated.textContent = `Updated ${fmtTime(pendingListUpdate.updated)}`;
+          
+          // 画像数が増えた場合、新しい画像を次のターンから表示できるようにする
+          // （displayedSetとcurrentIndexは維持）
+          if (items.length > oldItemsCount) {
+            console.log('[pickNext] 画像数が増加、新しい画像を次のターンから表示', '前回=' + oldItemsCount + '→今回=' + items.length);
+          }
+          // 画像数が減った場合、削除された画像IDをdisplayedSetから削除
+          else if (items.length < oldItemsCount) {
+            const newItemIds = new Set(items.map(it => it.id));
+            const idsToRemove = [];
+            displayedSet.forEach(id => {
+              if (!newItemIds.has(id)) {
+                idsToRemove.push(id);
+              }
+            });
+            idsToRemove.forEach(id => displayedSet.delete(id));
+            console.log('[pickNext] 画像数が減少、削除されたIDを表示済みセットから削除', '削除数=' + idsToRemove.length);
+          }
+          
+          pendingListUpdate = null;
+          
+          // 全ての画像が表示された後、再読み込みを行う
+          console.log('[pickNext] 周回完了、再読み込みを実行');
+          setTimeout(() => {
+            fetchList();
+          }, 100);
+        } else {
+          // 次の周回に入る
+          displayedSet.clear();
+          currentIndex = 0;
+        }
       }
       
       // 現在の周回でまだ表示していない画像を順番に表示
@@ -527,9 +641,12 @@
       displayedSet.clear();
       currentIndex = 0;
       const item = items[currentIndex];
-      displayedSet.add(item.id);
-      currentIndex = 1;
-      return item;
+      if (item) {
+        displayedSet.add(item.id);
+        currentIndex = 1;
+        return item;
+      }
+      return null;
     }
 
     async function preload(url) {
@@ -576,7 +693,13 @@
       inFlight = true;
       try {
         const it = pickNext();
-        if (!it) { return; }
+        if (!it) { 
+          inFlight = false;
+          return; 
+        }
+
+        // 現在表示中の画像IDを更新
+        currentDisplayingId = it.id;
 
         // どのURLで落ちてるか一緒に表示
         //status(`読み込み: ${it.name || ''}\n${it.url}`);
@@ -644,6 +767,10 @@
     (async () => {
       await fetchList();
       if (!items.length) return;
+
+      // 初期化時にpreviousItemIdsを設定
+      previousItemIds = new Set(items.map(it => it.id));
+      previousItemsCount = items.length;
 
       // 最初の1枚をすぐ表示
       await showNext();
