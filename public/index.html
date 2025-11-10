@@ -325,15 +325,24 @@
     let currentLayer = layerA;
     let nextLayer = layerB;
     let items = []; // {url, updatedAt, ...}
-    let timer = null;
     let running = true;
 
-    // ★ 追加: ループ管理
     let loopHandle = null;
     let inFlight = false;   // 遷移の同時実行防止
     let lastSwapAt = 0;     // 最後に画像が画面に出た時刻（ms）
-    let currentIndex = 0;   // 現在表示中のインデックス（アップロード順）
-    let displayedSet = new Set(); // 1周目で表示済みの画像IDを追跡
+    let currentDisplayingId = null; // 現在表示中の画像ID
+    let previousItemIds = new Set(); // 前回の画像IDセット（削除検出用）
+
+    const statsById = new Map(); // { lastShownAt, timesShown }
+    const recentQueue = [];      // 直近に表示したIDのキュー
+    const recentSet = new Set(); // recentQueue 検索用
+    const safeHalfLifeHours = Math.max(0.25, Number(HALF_LIFE_HOURS) || 1);
+    const HALF_LIFE_MS = safeHalfLifeHours * 60 * 60 * 1000;
+    const DECAY_K = Math.log(2) / HALF_LIFE_MS; // exp(-DECAY_K * 経過ms) で半減
+    const SHUFFLE_POOL = Math.max(1, Number(SHUFFLE_BATCH) || 1);
+    const MIN_WEIGHT = 0.05;
+    const RECENT_MIN = 3;
+    const RECENT_MAX = 12;
 
     // === UI 表示/非表示トグル ===
     let statusVisible = false; // 初期状態: 非表示
@@ -444,6 +453,90 @@
       try { return new Date(s).toLocaleString('ja-JP'); } catch { return s; }
     }
 
+    function recentWindowSize() {
+      if (!items.length) return 0;
+      const dynamic = Math.floor(items.length / 4);
+      return Math.max(RECENT_MIN, Math.min(RECENT_MAX, dynamic || RECENT_MIN));
+    }
+
+    function trimRecentQueue() {
+      const maxSize = recentWindowSize();
+      if (!maxSize) {
+        recentQueue.length = 0;
+        recentSet.clear();
+        return;
+      }
+      while (recentQueue.length > maxSize) {
+        const removed = recentQueue.shift();
+        recentSet.delete(removed);
+      }
+    }
+
+    function syncStatsWithItems(list) {
+      const liveIds = new Set(list.map(it => it.id));
+      statsById.forEach((_, id) => {
+        if (!liveIds.has(id)) statsById.delete(id);
+      });
+      list.forEach(it => {
+        if (!statsById.has(it.id)) {
+          statsById.set(it.id, { lastShownAt: 0, timesShown: 0 });
+        }
+      });
+      for (let i = recentQueue.length - 1; i >= 0; i -= 1) {
+        const id = recentQueue[i];
+        if (!liveIds.has(id)) {
+          recentQueue.splice(i, 1);
+          recentSet.delete(id);
+        }
+      }
+      trimRecentQueue();
+    }
+
+    function computeWeight(item, now) {
+      const updatedAtMs = Date.parse(item.updatedAt) || now;
+      const ageMs = Math.max(0, now - updatedAtMs);
+      const recency = Math.exp(-DECAY_K * ageMs);
+      const stats = statsById.get(item.id) || { lastShownAt: 0, timesShown: 0 };
+      const idleMs = stats.lastShownAt ? Math.max(0, now - stats.lastShownAt) : ageMs + HALF_LIFE_MS;
+      const idleBoost = 1 + Math.min(idleMs / HALF_LIFE_MS, 3);
+      const unseenBoost = stats.timesShown === 0 ? 1.6 : 1;
+      const cooldownPenalty = recentSet.has(item.id) ? 0.3 : 1;
+      const weight = Math.max(MIN_WEIGHT, recency * idleBoost * unseenBoost * cooldownPenalty);
+      return { weight, ageMs, idleMs };
+    }
+
+    function buildCandidatePool(now) {
+      const scored = items.map(item => {
+        const metrics = computeWeight(item, now);
+        return { item, ...metrics };
+      });
+      scored.sort((a, b) => b.weight - a.weight);
+      return scored.slice(0, Math.min(scored.length, SHUFFLE_POOL));
+    }
+
+    function weightedPick(entries) {
+      if (!entries.length) return null;
+      const total = entries.reduce((sum, entry) => sum + entry.weight, 0);
+      if (total === 0) return entries[0];
+      let threshold = Math.random() * total;
+      for (const entry of entries) {
+        threshold -= entry.weight;
+        if (threshold <= 0) return entry;
+      }
+      return entries[entries.length - 1];
+    }
+
+    function registerDisplay(itemId) {
+      const now = Date.now();
+      const stats = statsById.get(itemId) || { lastShownAt: 0, timesShown: 0 };
+      statsById.set(itemId, { lastShownAt: now, timesShown: stats.timesShown + 1 });
+      if (!recentSet.has(itemId)) {
+        recentQueue.push(itemId);
+        recentSet.add(itemId);
+      }
+      trimRecentQueue();
+    }
+
     async function fetchList() {
       setAppState('updating');
 
@@ -474,15 +567,33 @@
         }
 
         // 旧URLなら img64 に差し替え（既に入れてる場合はそのままでOK）
-        items = (json.items || []).map(it => {
+        const newItems = (json.items || []).map(it => {
           const u = new URL(it.url, location.href);
           if (u.searchParams.get('fn') === 'image') u.searchParams.set('fn', 'img64');
           return { ...it, url: u.toString() };
         });
 
-        // リストが更新されたらインデックスと表示済みセットをリセット（新しい順で並んでいるので最初から表示）
-        currentIndex = 0;
-        displayedSet.clear();
+        const newItemsCount = newItems.length;
+        const newItemIds = new Set(newItems.map(it => it.id));
+        const addedIds = [];
+        const removedIds = [];
+        newItemIds.forEach(id => {
+          if (!previousItemIds.has(id)) addedIds.push(id);
+        });
+        previousItemIds.forEach(id => {
+          if (!newItemIds.has(id)) removedIds.push(id);
+        });
+
+        items = newItems;
+        previousItemIds = newItemIds;
+        syncStatsWithItems(items);
+
+        if (addedIds.length) {
+          console.log('[fetchList] 新規画像', addedIds.length, '件');
+        }
+        if (removedIds.length) {
+          console.log('[fetchList] 削除画像', removedIds.length, '件');
+        }
 
         badgeCount.textContent = `${items.length} photos`;
         badgeUpdated.textContent = `Updated ${fmtTime(json.now)}`;
@@ -493,6 +604,17 @@
         }
         // 実行中かどうかで状態
         setAppState(running ? 'playing' : 'paused');
+
+        // 現在表示中の画像がなくなったら次を選ぶ
+        if (currentDisplayingId && removedIds.includes(currentDisplayingId)) {
+          console.log('[fetchList] 表示中の画像が削除されたためスキップ');
+          currentDisplayingId = null;
+          if (running && !inFlight) {
+            setTimeout(() => {
+              if (running) showNext();
+            }, 100);
+          }
+        }
       } catch (e) {
         console.error('fetch list error', e);
       } finally {
@@ -500,36 +622,16 @@
       }
     }
 
-    // アップロード順に順番に選択（全ての画像を1回表示してから次の周回に入る）
     function pickNext() {
       if (!items.length) return null;
-      
-      // 現在の周回で全ての画像が表示されたら、次の周回に入る
-      if (displayedSet.size >= items.length) {
-        displayedSet.clear();
-        currentIndex = 0; // 次の周回は最初から
-      }
-      
-      // 現在の周回でまだ表示していない画像を順番に表示
-      // currentIndexから順番に、まだ表示していない画像を探す
-      for (let i = 0; i < items.length; i++) {
-        const idx = (currentIndex + i) % items.length;
-        const item = items[idx];
-        if (!displayedSet.has(item.id)) {
-          // 表示済みセットに追加
-          displayedSet.add(item.id);
-          currentIndex = (idx + 1) % items.length;
-          return item;
-        }
-      }
-      
-      // 全て表示済みの場合は次の周回に入る（通常は到達しない）
-      displayedSet.clear();
-      currentIndex = 0;
-      const item = items[currentIndex];
-      displayedSet.add(item.id);
-      currentIndex = 1;
-      return item;
+      const now = Date.now();
+      const pool = buildCandidatePool(now);
+      if (!pool.length) return null;
+
+      const cooledPool = pool.filter(entry => !recentSet.has(entry.item.id));
+      const finalPool = cooledPool.length ? cooledPool : pool;
+      const chosen = weightedPick(finalPool);
+      return chosen ? chosen.item : null;
     }
 
     async function preload(url) {
@@ -576,7 +678,10 @@
       inFlight = true;
       try {
         const it = pickNext();
-        if (!it) { return; }
+        if (!it) { 
+          inFlight = false;
+          return; 
+        }
 
         // どのURLで落ちてるか一緒に表示
         //status(`読み込み: ${it.name || ''}\n${it.url}`);
@@ -590,6 +695,8 @@
         currentLayer.classList.remove('show');
         [currentLayer, nextLayer] = [nextLayer, currentLayer];
         // この瞬間から表示時間カウント開始
+        currentDisplayingId = it.id;
+        registerDisplay(it.id);
         lastSwapAt = Date.now();
         setAppState(running ? 'playing' : 'paused');
       } catch (e) {
@@ -621,11 +728,6 @@
         // 次回も「画面に出してから」SLIDE_MS後
         scheduleNext(SLIDE_MS);
       }, Math.max(0, afterMs));
-    }
-
-    function startLoop() {
-      if (timer) clearInterval(timer);
-      timer = setInterval(() => { if (running) showNext(); }, SLIDE_MS);
     }
 
     // 全画面切替（iPhone Safari）
